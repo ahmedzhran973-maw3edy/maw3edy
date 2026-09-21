@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Teachly | Simple lesson scheduling</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #e5e7eb;
+      --panel: #ffffff;
+      --soft: #f6f8fb;
+      --brand: #4f46e5;
+      --brand-dark: #3730a3;
+      --success: #047857;
+      --danger: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(145deg, #eef2ff 0%, #f8fafc 48%, #ecfeff 100%);
+      min-height: 100vh;
+    }
+    a { color: inherit; text-decoration: none; }
+    .shell { width: min(1100px, calc(100% - 40px)); margin: 0 auto; }
+    nav {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 26px 0;
+    }
+    .logo { font-size: 1.15rem; font-weight: 800; letter-spacing: -.04em; }
+    .nav-links { display: flex; gap: 22px; color: var(--muted); font-size: .93rem; }
+    .nav-links a:hover { color: var(--brand); }
+    .hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 70px; align-items: center; padding: 74px 0 92px; }
+    .eyebrow { color: var(--brand); font-weight: 800; text-transform: uppercase; letter-spacing: .12em; font-size: .76rem; }
+    h1 { font-size: clamp(2.8rem, 7vw, 5.3rem); letter-spacing: -.075em; line-height: .96; margin: 18px 0 24px; max-width: 700px; }
+    .hero p { font-size: 1.14rem; line-height: 1.7; color: var(--muted); max-width: 590px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+    .button {
+      border: 0; border-radius: 12px; padding: 13px 18px; font-weight: 750;
+      display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+      background: var(--brand); color: white; box-shadow: 0 10px 20px rgba(79,70,229,.18);
+    }
+    .button:hover { background: var(--brand-dark); }
+    .button.secondary { background: white; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+    .hero-card {
+      background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.8);
+      border-radius: 28px; padding: 26px; box-shadow: 0 24px 70px rgba(30,41,59,.12);
+    }
+    .calendar-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .calendar-head strong { font-size: 1.1rem; }
+    .dot { width: 10px; height: 10px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 7px; }
+    .slot { display: flex; gap: 14px; align-items: center; background: var(--soft); padding: 15px; border-radius: 15px; margin-top: 10px; }
+    .slot-time { min-width: 58px; font-weight: 800; font-size: .88rem; }
+    .slot-info { flex: 1; }
+    .slot-info strong { display: block; }
+    .slot-info small { color: var(--muted); }
+    .slot-status { font-size: .74rem; font-weight: 800; color: var(--success); }
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding-bottom: 70px; }
+    .feature { background: rgba(255,255,255,.78); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+    .feature-icon { font-size: 1.4rem; }
+    .feature h3 { margin: 14px 0 8px; }
+    .feature p { color: var(--muted); line-height: 1.55; margin: 0; }
+    .status { border-radius: 12px; padding: 12px 14px; font-size: .9rem; margin-top: 20px; }
+    .status.ok { color: var(--success); background: #ecfdf3; }
+    .status.bad { color: var(--danger); background: #fef3f2; }
+    @media (max-width: 780px) {
+      .hero { grid-template-columns: 1fr; gap: 34px; padding-top: 45px; }
+      .features { grid-template-columns: 1fr; }
+      .nav-links { gap: 12px; }
+      .shell { width: min(100% - 28px, 600px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav>
+      <a class="logo" href="{{ url_for('home') }}">teachly.</a>
+      <div class="nav-links">
+        <a href="{{ url_for('dashboard') }}">Teacher dashboard</a>
+        <a href="{{ url_for('book') }}">Book a session</a>
+      </div>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <div>
+          <div class="eyebrow">One simple place to teach</div>
+          <h1>Make time for better learning.</h1>
+          <p>Teachers can publish session types and availability. Students can find a time that works and book in a few clicks.</p>
+          <div class="actions">
+            <a class="button" href="{{ url_for('dashboard') }}">Set up a teacher</a>
+            <a class="button secondary" href="{{ url_for('book') }}">Browse sessions</a>
+          </div>
+          {% if database_ready %}
+            <div class="status ok">● Connected to Supabase database</div>
+          {% else %}
+            <div class="status bad">Database connection is unavailable. Try again shortly.</div>
+          {% endif %}
+        </div>
+        <div class="hero-card">
+          <div class="calendar-head">
+            <strong>Today's schedule</strong>
+            <span><span class="dot"></span>Live</span>
+          </div>
+          <div class="slot">
+            <div class="slot-time">09:00</div>
+            <div class="slot-info"><strong>Algebra foundations</strong><small>with Maya Chen</small></div>
+            <div class="slot-status">Confirmed</div>
+          </div>
+          <div class="slot">
+            <div class="slot-time">11:30</div>
+            <div class="slot-info"><strong>Conversation practice</strong><small>with Omar Hassan</small></div>
+            <div class="slot-status">Confirmed</div>
+          </div>
+          <div class="slot">
+            <div class="slot-time">15:00</div>
+            <div class="slot-info"><strong>Portfolio review</strong><small>with Lina Adel</small></div>
+            <div class="slot-status">Confirmed</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="features">
+        <article class="feature">
+          <div class="feature-icon">✦</div>
+          <h3>For teachers</h3>
+          <p>Create a profile, describe your sessions, and add the hours you are available.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">◷</div>
+          <h3>For students</h3>
+          <p>Choose a session and request a time that matches the teacher's schedule.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">⌁</div>
+          <h3>Built for clarity</h3>
+          <p>Every booking is checked for availability and overlapping appointments.</p>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

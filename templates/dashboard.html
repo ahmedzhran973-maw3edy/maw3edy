@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Teacher dashboard | Teachly</title>
+  <style>
+    :root { --ink:#172033; --muted:#667085; --line:#e5e7eb; --panel:#fff; --soft:#f8fafc; --brand:#4f46e5; --brand-dark:#3730a3; --good:#047857; --bad:#b42318; }
+    * { box-sizing: border-box; }
+    body { margin:0; color:var(--ink); background:#f7f8fc; font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    a { color:inherit; text-decoration:none; }
+    .shell { width:min(1180px,calc(100% - 40px)); margin:0 auto; }
+    nav { display:flex; justify-content:space-between; align-items:center; padding:25px 0; }
+    .logo { font-weight:850; letter-spacing:-.05em; font-size:1.15rem; }
+    .nav-links { display:flex; gap:20px; color:var(--muted); font-size:.93rem; }
+    .nav-links a:hover { color:var(--brand); }
+    .page-head { display:flex; justify-content:space-between; gap:20px; align-items:end; margin:28px 0 30px; }
+    .eyebrow { color:var(--brand); font-weight:800; text-transform:uppercase; letter-spacing:.11em; font-size:.74rem; }
+    h1 { font-size:clamp(2rem,4vw,3.3rem); line-height:1; letter-spacing:-.06em; margin:12px 0 0; }
+    .page-head p { color:var(--muted); margin:12px 0 0; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; padding-bottom:22px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 8px 24px rgba(15,23,42,.04); }
+    .card h2 { margin:0 0 5px; font-size:1.15rem; }
+    .card > p { color:var(--muted); font-size:.9rem; margin:0 0 18px; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    label { display:grid; gap:7px; color:#344054; font-size:.82rem; font-weight:700; }
+    .full { grid-column:1 / -1; }
+    input, textarea, select { width:100%; border:1px solid #d0d5dd; border-radius:10px; padding:11px 12px; color:var(--ink); background:white; font:inherit; font-size:.92rem; }
+    textarea { resize:vertical; min-height:78px; }
+    input:focus, textarea:focus, select:focus { outline:3px solid #e0e7ff; border-color:var(--brand); }
+    button { border:0; border-radius:10px; padding:11px 15px; background:var(--brand); color:white; font-weight:800; cursor:pointer; margin-top:15px; }
+    button:hover { background:var(--brand-dark); }
+    .flash { padding:12px 14px; border-radius:10px; margin-bottom:14px; font-size:.9rem; }
+    .flash.success { background:#ecfdf3; color:var(--good); }
+    .flash.error { background:#fef3f2; color:var(--bad); }
+    .section-head { display:flex; justify-content:space-between; align-items:center; margin:28px 0 12px; }
+    .section-head h2 { margin:0; letter-spacing:-.03em; }
+    .count { color:var(--muted); font-size:.86rem; }
+    .list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding-bottom:55px; }
+    .item { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+    .item strong { display:block; margin-bottom:5px; }
+    .item p { color:var(--muted); font-size:.88rem; line-height:1.5; margin:7px 0 0; }
+    .meta { color:var(--muted); font-size:.79rem; }
+    .empty { color:var(--muted); padding:16px 0 35px; }
+    .db-status { color:var(--good); font-size:.86rem; font-weight:700; }
+    @media (max-width:850px) { .grid,.list { grid-template-columns:1fr; } }
+    @media (max-width:620px) { .shell { width:min(100% - 28px,600px); } .form-grid { grid-template-columns:1fr; } .full { grid-column:auto; } .page-head { display:block; } .nav-links { gap:12px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav>
+      <a class="logo" href="{{ url_for('home') }}">teachly.</a>
+      <div class="nav-links"><a href="{{ url_for('book') }}">Book a session</a><a href="{{ url_for('home') }}">Home</a></div>
+    </nav>
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Teacher workspace</div>
+        <h1>Build your teaching schedule.</h1>
+        <p>Set up a profile, publish session types, and tell students when you are available.</p>
+      </div>
+      {% if database_ready %}<div class="db-status">● Supabase connected</div>{% endif %}
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+
+    <div class="grid">
+      <section class="card">
+        <h2>Register a teacher</h2>
+        <p>Create or update a teacher profile using their email.</p>
+        <form method="post" action="{{ url_for('register_teacher') }}">
+          <div class="form-grid">
+            <label>Full name<input name="full_name" placeholder="e.g. Maya Chen" required></label>
+            <label>Email<input type="email" name="email" placeholder="maya@example.com" required></label>
+            <label class="full">Short bio<textarea name="bio" placeholder="What do you teach?"></textarea></label>
+          </div>
+          <button type="submit">Save teacher profile</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Create a session type</h2>
+        <p>Give students a clear option to book.</p>
+        <form method="post" action="{{ url_for('create_session_type') }}">
+          <div class="form-grid">
+            <label class="full">Teacher
+              <select name="teacher_id" required>
+                <option value="">Select a teacher</option>
+                {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}" {% if selected_teacher_id == teacher.id %}selected{% endif %}>{{ teacher.full_name }} — {{ teacher.email }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Session title<input name="title" placeholder="Algebra foundations" required></label>
+            <label>Duration (minutes)<input type="number" name="duration_minutes" value="60" min="5" max="480" required></label>
+            <label>Price<input type="number" name="price" value="0" min="0" step="0.01"></label>
+            <label class="full">Description<textarea name="description" placeholder="What will students learn?"></textarea></label>
+          </div>
+          <button type="submit">Create session type</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Set availability</h2>
+        <p>Add a weekly window when students can book.</p>
+        <form method="post" action="{{ url_for('set_availability') }}">
+          <div class="form-grid">
+            <label class="full">Teacher
+              <select name="teacher_id" required>
+                <option value="">Select a teacher</option>
+                {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}" {% if selected_teacher_id == teacher.id %}selected{% endif %}>{{ teacher.full_name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Day
+              <select name="day_of_week" required>
+                {% for day in ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] %}
+                  <option value="{{ loop.index0 }}">{{ day }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Starts at<input type="time" name="start_time" value="09:00" required></label>
+            <label>Ends at<input type="time" name="end_time" value="17:00" required></label>
+          </div>
+          <button type="submit">Save availability</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="section-head"><h2>Published sessions</h2><span class="count">{{ session_types|length }} total</span></div>
+    {% if session_types %}
+      <div class="list">
+        {% for session in session_types %}
+          <article class="item">
+            <strong>{{ session.title }}</strong>
+            <div class="meta">{{ session.teacher_name }} · {{ session.duration_minutes }} min · ${{ "%.2f"|format(session.price) }}</div>
+            {% if session.description %}<p>{{ session.description }}</p>{% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}<div class="empty">No session types yet. Create the first one above.</div>{% endif %}
+
+    <div class="section-head"><h2>Availability windows</h2><span class="count">{{ availability|length }} total</span></div>
+    {% if availability %}
+      <div class="list">
+        {% for slot in availability %}
+          <article class="item"><strong>{{ slot.teacher_name }}</strong><div class="meta">{{ slot.day_name }} · {{ slot.start_time.strftime("%H:%M") }}–{{ slot.end_time.strftime("%H:%M") }}</div></article>
+        {% endfor %}
+      </div>
+    {% else %}<div class="empty">No availability windows yet. Add a weekly window above.</div>{% endif %}
+  </div>
+</body>
+</html>
