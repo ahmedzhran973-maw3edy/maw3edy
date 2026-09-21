@@ -4,18 +4,26 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# جلب رابط قاعدة البيانات المحمي من أداة Secrets
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
 @app.route('/')
 def home():
+    database_url = os.environ.get("DATABASE_URL")
+
+    if not database_url:
+        return (
+            "<h1>⚠️ حدث خطأ في الاتصال:</h1> "
+            "<p>تعذر الاتصال بقاعدة البيانات حاليًا. يرجى المحاولة لاحقًا.</p>"
+        ), 503
+
     try:
         # محاولة الاتصال بقاعدة البيانات في Supabase
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(database_url, connect_timeout=5)
         conn.close()
         return "<h1>🎉 مبروك يا أحمد! السيرفر يعمل بنجاح وتم الاتصال بقاعدة البيانات!</h1>"
-    except Exception as e:
-        return f"<h1>⚠️ حدث خطأ في الاتصال:</h1> <p>{e}</p>"
+    except Exception:
+        return (
+            "<h1>⚠️ حدث خطأ في الاتصال:</h1> "
+            "<p>تعذر الاتصال بقاعدة البيانات حاليًا. يرجى المحاولة لاحقًا.</p>"
+        ), 503
 
 if __name__ == '__main__':
     # تشغيل التطبيق ليراه الجميع
