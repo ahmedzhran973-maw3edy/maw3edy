@@ -1,7 +1,10 @@
+import json
 import os
+from pathlib import Path
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from threading import Lock
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg2
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -20,6 +23,7 @@ DAY_NAMES = [
     "Friday",
     "Saturday",
 ]
+TRANSLATIONS_PATH = Path(__file__).with_name("translations.json")
 
 SCHEMA_STATEMENTS = (
     """
@@ -28,6 +32,7 @@ SCHEMA_STATEMENTS = (
         full_name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         bio TEXT NOT NULL DEFAULT '',
+        timezone TEXT NOT NULL DEFAULT 'UTC',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
@@ -77,6 +82,10 @@ SCHEMA_STATEMENTS = (
     """
     ALTER TABLE teachers
     ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE teachers
+    ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC'
     """,
     """
     ALTER TABLE session_types
@@ -183,7 +192,7 @@ def wants_json():
 def success_response(payload, redirect_endpoint, status=201, **redirect_values):
     if wants_json():
         return jsonify(json_value(payload)), status
-    flash(payload.get("message", "Saved successfully."), "success")
+    flash(payload.get("message_key", payload.get("message", "Saved successfully.")), "success")
     return redirect(url_for(redirect_endpoint, **redirect_values))
 
 
@@ -218,15 +227,34 @@ def parse_start_datetime(raw):
     except ValueError as exc:
         raise ValueError("starts_at must be a valid ISO date and time.") from exc
 
-    if parsed.tzinfo:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    if parsed.tzinfo is None:
+        raise ValueError("starts_at must include a timezone.")
+    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
+
+
+def parse_timezone(raw):
+    timezone_name = raw or "UTC"
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("timezone must be a valid IANA timezone.") from exc
+    return timezone_name
+
+
+def load_translations():
+    try:
+        with TRANSLATIONS_PATH.open(encoding="utf-8") as translations_file:
+            return json.load(translations_file)
+    except (OSError, json.JSONDecodeError):
+        app.logger.exception("Could not load translations.json")
+        return {}
 
 
 def fetch_dashboard_data():
     teachers = fetch_all(
         """
-        SELECT id, full_name, email, bio, created_at
+        SELECT id, full_name, email, bio, timezone, created_at
         FROM teachers
         ORDER BY full_name
         """
@@ -244,14 +272,12 @@ def fetch_dashboard_data():
     availability = fetch_all(
         """
         SELECT a.id, a.teacher_id, a.day_of_week, a.start_time, a.end_time,
-               t.full_name AS teacher_name
+               t.full_name AS teacher_name, t.timezone
         FROM availability a
         JOIN teachers t ON t.id = a.teacher_id
         ORDER BY t.full_name, a.day_of_week, a.start_time
         """
     )
-    for slot in availability:
-        slot["day_name"] = DAY_NAMES[slot["day_of_week"]]
     return teachers, session_types, availability
 
 
@@ -265,6 +291,11 @@ def home():
         app.logger.exception("Homepage database check failed")
 
     return render_template("index.html", database_ready=database_ready)
+
+
+@app.get("/translations.json")
+def translations():
+    return jsonify(load_translations())
 
 
 @app.get("/dashboard")
@@ -305,14 +336,12 @@ def book():
         availability = fetch_all(
             """
             SELECT a.teacher_id, a.day_of_week, a.start_time, a.end_time,
-                   t.full_name AS teacher_name
+                   t.full_name AS teacher_name, t.timezone
             FROM availability a
             JOIN teachers t ON t.id = a.teacher_id
             ORDER BY t.full_name, a.day_of_week, a.start_time
             """
         )
-        for slot in availability:
-            slot["day_name"] = DAY_NAMES[slot["day_of_week"]]
         database_ready = True
     except DatabaseUnavailable:
         app.logger.exception("Booking page database load failed")
@@ -333,7 +362,7 @@ def list_teachers():
         ensure_schema()
         return jsonify(json_value(fetch_all(
             """
-            SELECT id, full_name, email, bio, created_at
+            SELECT id, full_name, email, bio, timezone, created_at
             FROM teachers
             ORDER BY full_name
             """
@@ -348,6 +377,10 @@ def register_teacher():
     full_name = value(data, "full_name")
     email = value(data, "email").lower()
     bio = value(data, "bio")
+    try:
+        teacher_timezone = parse_timezone(value(data, "timezone", "UTC"))
+    except ValueError as exc:
+        return error_response(str(exc), 400, "dashboard")
 
     if not full_name or not email or "@" not in email:
         return error_response(
@@ -364,14 +397,15 @@ def register_teacher():
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO teachers (full_name, email, bio)
-                        VALUES (%s, %s, %s)
+                        INSERT INTO teachers (full_name, email, bio, timezone)
+                        VALUES (%s, %s, %s, %s)
                         ON CONFLICT (email) DO UPDATE
                         SET full_name = EXCLUDED.full_name,
-                            bio = EXCLUDED.bio
-                        RETURNING id, full_name, email, bio, created_at
+                            bio = EXCLUDED.bio,
+                            timezone = EXCLUDED.timezone
+                        RETURNING id, full_name, email, bio, timezone, created_at
                         """,
-                        (full_name, email, bio),
+                        (full_name, email, bio, teacher_timezone),
                     )
                     teacher = dict(cursor.fetchone())
         finally:
@@ -381,6 +415,7 @@ def register_teacher():
         return success_response(
             {
                 "message": "Teacher profile saved.",
+                "message_key": "messages.teacherSaved",
                 "teacher": teacher,
             },
             "dashboard",
@@ -469,6 +504,7 @@ def create_session_type():
         return success_response(
             {
                 "message": "Session type created.",
+                "message_key": "messages.sessionCreated",
                 "session_type": session_type,
             },
             "dashboard",
@@ -489,8 +525,10 @@ def list_availability():
         if teacher_id:
             slots = fetch_all(
                 """
-                SELECT id, teacher_id, day_of_week, start_time, end_time, created_at
+                SELECT a.id, a.teacher_id, a.day_of_week, a.start_time,
+                       a.end_time, a.created_at, t.timezone
                 FROM availability
+                JOIN teachers t ON t.id = availability.teacher_id
                 WHERE teacher_id = %s
                 ORDER BY day_of_week, start_time
                 """,
@@ -499,14 +537,130 @@ def list_availability():
         else:
             slots = fetch_all(
                 """
-                SELECT id, teacher_id, day_of_week, start_time, end_time, created_at
-                FROM availability
+                SELECT a.id, a.teacher_id, a.day_of_week, a.start_time,
+                       a.end_time, a.created_at, t.timezone
+                FROM availability a
+                JOIN teachers t ON t.id = a.teacher_id
                 ORDER BY teacher_id, day_of_week, start_time
                 """
             )
         return jsonify(json_value(slots))
     except DatabaseUnavailable:
         return database_error()
+
+
+@app.get("/api/slots")
+def list_slots():
+    try:
+        session_type_id = request.args.get("session_type_id", type=int)
+        days = request.args.get("days", default=14, type=int)
+        if not session_type_id or session_type_id <= 0:
+            return error_response("session_type_id must be a positive integer.", 400)
+        days = min(max(days, 1), 31)
+
+        ensure_schema()
+        session_types = fetch_all(
+            """
+            SELECT st.id, st.title, st.teacher_id, st.duration_minutes,
+                   t.full_name AS teacher_name, t.timezone
+            FROM session_types st
+            JOIN teachers t ON t.id = st.teacher_id
+            WHERE st.id = %s
+            """,
+            (session_type_id,),
+        )
+        if not session_types:
+            return error_response("The selected session type does not exist.", 404)
+
+        session_type = session_types[0]
+        teacher_timezone = ZoneInfo(session_type["timezone"] or "UTC")
+        availability = fetch_all(
+            """
+            SELECT day_of_week, start_time, end_time
+            FROM availability
+            WHERE teacher_id = %s
+            ORDER BY day_of_week, start_time
+            """,
+            (session_type["teacher_id"],),
+        )
+        bookings = fetch_all(
+            """
+            SELECT starts_at, ends_at
+            FROM bookings
+            WHERE teacher_id = %s AND status = 'confirmed'
+              AND starts_at >= %s
+              AND starts_at < %s
+            """,
+            (
+                session_type["teacher_id"],
+                datetime.now(timezone.utc).replace(tzinfo=None),
+                (
+                    datetime.now(timezone.utc).replace(tzinfo=None)
+                    + timedelta(days=days + 2)
+                ),
+            ),
+        )
+
+        now_utc = datetime.now(timezone.utc)
+        teacher_today = now_utc.astimezone(teacher_timezone).date()
+        duration = timedelta(minutes=session_type["duration_minutes"])
+        slots = []
+
+        for day_offset in range(days + 1):
+            local_date = teacher_today + timedelta(days=day_offset)
+            local_day = (local_date.weekday() + 1) % 7
+            for window in availability:
+                if window["day_of_week"] != local_day:
+                    continue
+                local_start = datetime.combine(
+                    local_date,
+                    window["start_time"],
+                    tzinfo=teacher_timezone,
+                )
+                local_end = datetime.combine(
+                    local_date,
+                    window["end_time"],
+                    tzinfo=teacher_timezone,
+                )
+                candidate = local_start
+                while candidate + duration <= local_end:
+                    utc_start = candidate.astimezone(timezone.utc)
+                    utc_end = (candidate + duration).astimezone(timezone.utc)
+                    naive_start = utc_start.replace(tzinfo=None)
+                    naive_end = utc_end.replace(tzinfo=None)
+                    is_booked = any(
+                        booking["starts_at"] < naive_end
+                        and booking["ends_at"] > naive_start
+                        for booking in bookings
+                    )
+                    if utc_start > now_utc and not is_booked:
+                        slots.append(
+                            {
+                                "starts_at": utc_start.isoformat().replace(
+                                    "+00:00", "Z"
+                                ),
+                                "ends_at": utc_end.isoformat().replace(
+                                    "+00:00", "Z"
+                                ),
+                                "teacher_name": session_type["teacher_name"],
+                                "teacher_timezone": session_type["timezone"],
+                                "session_title": session_type["title"],
+                            }
+                        )
+                    candidate += timedelta(minutes=30)
+
+        slots.sort(key=lambda slot: slot["starts_at"])
+        return jsonify(
+            {
+                "timezone": "UTC",
+                "teacher_timezone": session_type["timezone"],
+                "slots": slots,
+            }
+        )
+    except DatabaseUnavailable:
+        return database_error()
+    except ZoneInfoNotFoundError:
+        return error_response("The teacher timezone is invalid.", 500)
 
 
 @app.post("/api/availability")
@@ -564,6 +718,7 @@ def set_availability():
         return success_response(
             {
                 "message": "Availability saved.",
+                "message_key": "messages.availabilitySaved",
                 "availability": slot,
             },
             "dashboard",
@@ -616,7 +771,7 @@ def create_booking():
     except ValueError as exc:
         return error_response(str(exc), 400, "book")
 
-    if starts_at <= datetime.now():
+    if starts_at <= datetime.now(timezone.utc).replace(tzinfo=None):
         return error_response("Bookings must be scheduled in the future.", 400, "book")
 
     try:
@@ -627,9 +782,11 @@ def create_booking():
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute(
                         """
-                        SELECT id, teacher_id, duration_minutes, title
-                        FROM session_types
-                        WHERE id = %s
+                        SELECT st.id, st.teacher_id, st.duration_minutes, st.title,
+                               t.timezone
+                        FROM session_types st
+                        JOIN teachers t ON t.id = st.teacher_id
+                        WHERE st.id = %s
                         """,
                         (session_type_id,),
                     )
@@ -645,7 +802,20 @@ def create_booking():
                     ends_at = starts_at + timedelta(
                         minutes=session_type["duration_minutes"]
                     )
-                    day_of_week = (starts_at.weekday() + 1) % 7
+                    teacher_timezone = ZoneInfo(session_type["timezone"] or "UTC")
+                    local_start = starts_at.replace(
+                        tzinfo=timezone.utc
+                    ).astimezone(teacher_timezone)
+                    local_end = ends_at.replace(
+                        tzinfo=timezone.utc
+                    ).astimezone(teacher_timezone)
+                    if local_start.date() != local_end.date():
+                        return error_response(
+                            "The session must finish on the same local day.",
+                            409,
+                            "book",
+                        )
+                    day_of_week = (local_start.weekday() + 1) % 7
 
                     # Serialize bookings for one teacher to prevent double booking
                     # when two students submit the same time at once.
@@ -663,7 +833,12 @@ def create_booking():
                           AND end_time >= %s
                         LIMIT 1
                         """,
-                        (teacher_id, day_of_week, starts_at.time(), ends_at.time()),
+                        (
+                            teacher_id,
+                            day_of_week,
+                            local_start.time(),
+                            local_end.time(),
+                        ),
                     )
                     if cursor.fetchone() is None:
                         return error_response(
@@ -717,6 +892,7 @@ def create_booking():
         return success_response(
             {
                 "message": "Booking confirmed.",
+                "message_key": "messages.bookingConfirmed",
                 "booking": booking,
             },
             "book",

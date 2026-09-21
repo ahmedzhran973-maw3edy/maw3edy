@@ -1,118 +1,153 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Book a session | Teachly</title>
-  <style>
-    :root { --ink:#172033; --muted:#667085; --line:#e5e7eb; --panel:#fff; --soft:#f8fafc; --brand:#4f46e5; --brand-dark:#3730a3; --good:#047857; --bad:#b42318; }
-    * { box-sizing:border-box; }
-    body { margin:0; color:var(--ink); background:linear-gradient(145deg,#eef2ff,#f8fafc 55%,#ecfeff); font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
-    a { color:inherit; text-decoration:none; }
-    .shell { width:min(1100px,calc(100% - 40px)); margin:0 auto; }
-    nav { display:flex; justify-content:space-between; align-items:center; padding:25px 0; }
-    .logo { font-weight:850; letter-spacing:-.05em; font-size:1.15rem; }
-    .nav-links { display:flex; gap:20px; color:var(--muted); font-size:.93rem; }
-    .nav-links a:hover { color:var(--brand); }
-    .page-head { padding:54px 0 32px; }
-    .eyebrow { color:var(--brand); font-weight:800; text-transform:uppercase; letter-spacing:.11em; font-size:.74rem; }
-    h1 { font-size:clamp(2.5rem,6vw,4.7rem); line-height:.98; letter-spacing:-.075em; margin:13px 0 18px; max-width:700px; }
-    .page-head p { color:var(--muted); font-size:1.05rem; max-width:580px; line-height:1.65; }
-    .flash { padding:12px 14px; border-radius:10px; margin-bottom:14px; font-size:.9rem; }
-    .flash.success { background:#ecfdf3; color:var(--good); }
-    .flash.error { background:#fef3f2; color:var(--bad); }
-    .layout { display:grid; grid-template-columns:1.08fr .92fr; gap:20px; padding-bottom:65px; }
-    .card { background:rgba(255,255,255,.86); border:1px solid var(--line); border-radius:20px; padding:23px; box-shadow:0 10px 30px rgba(15,23,42,.06); }
-    .card h2 { margin:0 0 6px; font-size:1.2rem; }
-    .card-intro { color:var(--muted); font-size:.9rem; margin:0 0 18px; }
-    .session-option { display:block; border:1px solid var(--line); background:white; border-radius:14px; padding:15px; margin-top:10px; cursor:pointer; }
-    .session-option:has(input:checked) { border-color:var(--brand); box-shadow:0 0 0 3px #e0e7ff; }
-    .session-option input { margin-right:8px; accent-color:var(--brand); }
-    .session-title { font-weight:800; }
-    .session-meta { color:var(--muted); font-size:.82rem; margin:7px 0 0 24px; }
-    .session-description { color:#475467; font-size:.84rem; margin:8px 0 0 24px; line-height:1.45; }
-    .form { margin-top:22px; border-top:1px solid var(--line); padding-top:20px; }
-    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    label { display:grid; gap:7px; color:#344054; font-size:.82rem; font-weight:700; }
-    .full { grid-column:1 / -1; }
-    input, textarea { width:100%; border:1px solid #d0d5dd; border-radius:10px; padding:11px 12px; color:var(--ink); background:white; font:inherit; font-size:.92rem; }
-    textarea { min-height:78px; resize:vertical; }
-    input:focus, textarea:focus { outline:3px solid #e0e7ff; border-color:var(--brand); }
-    button { width:100%; border:0; border-radius:10px; padding:12px 15px; background:var(--brand); color:white; font-weight:800; cursor:pointer; margin-top:15px; }
-    button:hover { background:var(--brand-dark); }
-    .availability { display:grid; gap:9px; }
-    .availability-row { background:var(--soft); border-radius:12px; padding:13px 14px; }
-    .availability-row strong { display:block; font-size:.9rem; }
-    .availability-row span { color:var(--muted); font-size:.82rem; }
-    .empty { color:var(--muted); line-height:1.6; }
-    .tip { color:var(--muted); font-size:.8rem; line-height:1.5; margin-top:14px; }
-    @media (max-width:800px) { .layout { grid-template-columns:1fr; } }
-    @media (max-width:580px) { .shell { width:min(100% - 28px,600px); } .form-grid { grid-template-columns:1fr; } .full { grid-column:auto; } .nav-links { gap:12px; } }
-  </style>
+  <title data-i18n="page.bookTitle">Book a session | Maw3edy</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+  <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
 </head>
 <body>
   <div class="shell">
-    <nav>
-      <a class="logo" href="{{ url_for('home') }}">teachly.</a>
-      <div class="nav-links"><a href="{{ url_for('dashboard') }}">Teacher dashboard</a><a href="{{ url_for('home') }}">Home</a></div>
-    </nav>
+    <header class="site-header">
+      <a class="brand" href="{{ url_for('home') }}">Maw3edy</a>
+      <nav class="nav" aria-label="Primary navigation">
+        <a href="{{ url_for('dashboard') }}" data-i18n="nav.dashboard">Teacher dashboard</a>
+        <a href="{{ url_for('home') }}" data-i18n="nav.home">Home</a>
+        <select class="language-picker" data-language-selector aria-label="Language">
+          <option value="en" data-i18n="languages.en">English</option>
+          <option value="ar" data-i18n="languages.ar">العربية</option>
+          <option value="fr" data-i18n="languages.fr">Français</option>
+          <option value="es" data-i18n="languages.es">Español</option>
+          <option value="de" data-i18n="languages.de">Deutsch</option>
+          <option value="tr" data-i18n="languages.tr">Türkçe</option>
+        </select>
+      </nav>
+    </header>
+
     <header class="page-head">
-      <div class="eyebrow">Find your next session</div>
-      <h1>Choose a time that works for you.</h1>
-      <p>Select a session, share your details, and request a time inside the teacher's published availability.</p>
+      <div class="eyebrow" data-i18n="book.eyebrow">Find your next session</div>
+      <h1 data-i18n="book.heading">Choose a time that works for you.</h1>
+      <p data-i18n="book.description">Select a session, share your details, and request a time inside the teacher's published availability.</p>
     </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+      {% for category, message in messages %}<div class="flash {{ category }}" data-i18n="{{ message }}">{{ message }}</div>{% endfor %}
     {% endwith %}
 
     <div class="layout">
       <section class="card">
-        <h2>Book a session</h2>
-        <p class="card-intro">All times are checked against the teacher's availability and existing bookings.</p>
+        <h2 data-i18n="book.bookTitle">Book a session</h2>
+        <p class="card-intro" data-i18n="book.allTimes">Times are automatically shown in your local timezone and checked against the teacher's availability.</p>
         {% if session_types %}
-          <form method="post" action="{{ url_for('create_booking') }}">
+          <form id="booking-form" method="post" action="{{ url_for('create_booking') }}">
             {% for session in session_types %}
               <label class="session-option">
                 <input type="radio" name="session_type_id" value="{{ session.id }}" {% if loop.first %}checked{% endif %} required>
                 <span class="session-title">{{ session.title }}</span>
-                <div class="session-meta">{{ session.teacher_name }} · {{ session.duration_minutes }} minutes · ${{ "%.2f"|format(session.price) }}</div>
+                <div class="session-meta">{{ session.teacher_name }} · {{ session.duration_minutes }} <span data-i18n="book.minutes">minutes</span> · ${{ "%.2f"|format(session.price) }}</div>
                 {% if session.description %}<div class="session-description">{{ session.description }}</div>{% endif %}
               </label>
             {% endfor %}
-            <div class="form">
+            <div class="booking-form">
+              <label><span data-i18n="book.chooseSlot">Choose an available time</span></label>
+              <div id="slot-list" class="slot-list" aria-live="polite"></div>
+              <input type="hidden" id="starts-at" name="starts_at" required>
               <div class="form-grid">
-                <label>Your name<input name="student_name" placeholder="e.g. Samir Ali" required></label>
-                <label>Email<input type="email" name="student_email" placeholder="samir@example.com" required></label>
-                <label>Requested start time<input type="datetime-local" name="starts_at" required></label>
-                <label class="full">Notes (optional)<textarea name="notes" placeholder="What would you like to focus on?"></textarea></label>
+                <label><span data-i18n="book.studentName">Your name</span><input name="student_name" data-i18n-placeholder="book.studentNamePlaceholder" placeholder="e.g. Samir Ali" required></label>
+                <label><span data-i18n="dashboard.email">Email</span><input type="email" name="student_email" data-i18n-placeholder="dashboard.emailPlaceholder" placeholder="maya@example.com" required></label>
+                <label class="full"><span data-i18n="book.notes">Notes (optional)</span><textarea name="notes" data-i18n-placeholder="book.notesPlaceholder" placeholder="What would you like to focus on?"></textarea></label>
               </div>
-              <button type="submit">Confirm booking</button>
-              <div class="tip">Use your local time. The request must start in the future and fit within a published availability window.</div>
+              <button type="submit" data-i18n="book.confirm">Confirm booking</button>
+              <p class="timezone-note"><span data-i18n="book.localTime">Your local time</span>: <strong id="client-timezone">UTC</strong>. <span data-i18n="book.timezoneNotice">The submitted time is normalized to UTC automatically.</span></p>
             </div>
           </form>
         {% else %}
-          <p class="empty">There are no published sessions yet. Teachers can add one from the <a href="{{ url_for('dashboard') }}" style="color:var(--brand);font-weight:750">dashboard</a>.</p>
+          <p class="empty"><span data-i18n="book.noSessions">There are no published sessions yet. Teachers can add one from the</span> <a href="{{ url_for('dashboard') }}" style="color:var(--brand);font-weight:800" data-i18n="book.dashboardLink">dashboard</a>.</p>
         {% endif %}
       </section>
 
       <aside class="card">
-        <h2>Published availability</h2>
-        <p class="card-intro">These are the weekly windows currently open for booking.</p>
+        <h2 data-i18n="book.publishedTitle">Published availability</h2>
+        <p class="card-intro" data-i18n="book.publishedText">These are the weekly windows currently open for booking.</p>
         {% if availability %}
-          <div class="availability">
+          <div class="availability-list">
             {% for slot in availability %}
               <div class="availability-row">
-                <strong>{{ slot.teacher_name }} · {{ slot.day_name }}</strong>
-                <span>{{ slot.start_time.strftime("%H:%M") }}–{{ slot.end_time.strftime("%H:%M") }}</span>
+                <strong>{{ slot.teacher_name }} · <span data-i18n-day="{{ slot.day_of_week }}">{{ ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][slot.day_of_week] }}</span></strong>
+                <span>{{ slot.start_time.strftime("%H:%M") }}–{{ slot.end_time.strftime("%H:%M") }} · {{ slot.timezone }}</span>
               </div>
             {% endfor %}
           </div>
-        {% else %}
-          <p class="empty">No availability has been published yet.</p>
-        {% endif %}
+        {% else %}<p class="empty" data-i18n="book.noAvailability">No availability has been published yet.</p>{% endif %}
       </aside>
     </div>
   </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const form = document.getElementById("booking-form");
+      if (!form) return;
+      const slotList = document.getElementById("slot-list");
+      const startsAt = document.getElementById("starts-at");
+      const timezone = document.getElementById("client-timezone");
+      const sessionInputs = Array.from(form.querySelectorAll("input[name='session_type_id']"));
+
+      function setSlotValue(value) {
+        const parsed = new Date(value);
+        startsAt.value = Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+      }
+
+      function renderSlots(slots) {
+        if (!slots.length) {
+          slotList.innerHTML = '<div class="empty" data-i18n="book.noSlots">No available times in the next two weeks.</div>';
+          window.Maw3edyI18n.apply();
+          startsAt.value = "";
+          return;
+        }
+        slotList.innerHTML = slots.map((slot, index) => `
+          <label class="slot-choice">
+            <input type="radio" name="slot-choice" value="${slot.starts_at}" ${index === 0 ? "checked" : ""}>
+            <strong>${window.Maw3edyI18n.formatLocalSlot(slot.starts_at)}</strong>
+          </label>
+        `).join("");
+        const first = slotList.querySelector("input[name='slot-choice']");
+        if (first) setSlotValue(first.value);
+        slotList.querySelectorAll("input[name='slot-choice']").forEach((input) => {
+          input.addEventListener("change", () => setSlotValue(input.value));
+        });
+      }
+
+      async function loadSlots() {
+        const selected = sessionInputs.find((input) => input.checked);
+        if (!selected) return;
+        slotList.innerHTML = '<div class="empty" data-i18n="book.loadingSlots">Loading available times…</div>';
+        window.Maw3edyI18n.apply();
+        startsAt.value = "";
+        try {
+          const response = await fetch(`/api/slots?session_type_id=${encodeURIComponent(selected.value)}&days=14`, { cache: "no-store" });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Unable to load slots");
+          renderSlots(payload.slots || []);
+        } catch (error) {
+          slotList.innerHTML = `<div class="empty">${error.message}</div>`;
+        }
+      }
+
+      timezone.textContent = window.Maw3edyI18n.browserTimezone();
+      sessionInputs.forEach((input) => input.addEventListener("change", loadSlots));
+      form.addEventListener("submit", (event) => {
+        const selectedSlot = slotList.querySelector("input[name='slot-choice']:checked");
+        if (!selectedSlot) {
+          event.preventDefault();
+          slotList.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+        setSlotValue(selectedSlot.value);
+        if (!startsAt.value.endsWith("Z")) event.preventDefault();
+      });
+      window.Maw3edyI18n.ready.then(loadSlots);
+    });
+  </script>
 </body>
 </html>
