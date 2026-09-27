@@ -5,7 +5,9 @@
   let activeLanguage = fallbackLanguage;
 
   function lookup(key) {
-    return key.split(".").reduce((value, part) => value && value[part], catalog[activeLanguage]);
+    const read = (language) =>
+      key.split(".").reduce((value, part) => value && value[part], catalog[language]);
+    return read(activeLanguage) ?? read(fallbackLanguage);
   }
 
   function languageFromBrowser() {
@@ -31,6 +33,12 @@
   function apply() {
     document.documentElement.lang = activeLanguage;
     document.documentElement.dir = activeLanguage === "ar" ? "rtl" : "ltr";
+    const bootstrap = document.querySelector("[data-bootstrap-css]");
+    if (bootstrap) {
+      bootstrap.href = activeLanguage === "ar"
+        ? "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css"
+        : "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css";
+    }
     document.querySelectorAll("[data-i18n]").forEach(translateElement);
     document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
       const translated = lookup(element.dataset.i18nPlaceholder);
@@ -57,7 +65,7 @@
     window.location.assign(url.toString());
   }
 
-  const ready = fetch("/translations.json", { cache: "no-store" })
+  const ready = fetch("/static/translations.json", { cache: "no-store" })
     .then((response) => response.json())
     .then((translations) => {
       catalog = translations;

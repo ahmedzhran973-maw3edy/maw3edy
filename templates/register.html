@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="page.registerTitle">Create a teacher account | Maw3edy</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" data-bootstrap-css>
+  <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
+</head>
+<body class="bg-light py-5">
+  <div class="container" style="max-width: 500px;">
+    <div class="card shadow-sm border-0 p-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <a href="/" class="fw-bold text-decoration-none">Maw3edy</a>
+        <select class="form-select form-select-sm w-auto" data-language-selector aria-label="Language">
+          <option value="en" data-i18n="languages.en">English</option>
+          <option value="ar" data-i18n="languages.ar">العربية</option>
+          <option value="fr" data-i18n="languages.fr">Français</option>
+          <option value="es" data-i18n="languages.es">Español</option>
+          <option value="de" data-i18n="languages.de">Deutsch</option>
+          <option value="tr" data-i18n="languages.tr">Türkçe</option>
+        </select>
+      </div>
+      <h2 class="text-center text-primary mb-4 fw-bold" data-i18n="auth.registerTitle">Create a teacher account</h2>
+
+      {% if error %}
+      <div class="alert alert-danger" data-i18n="{{ error_key }}">{{ error }}</div>
+      {% endif %}
+
+      <form action="/register" method="POST">
+        <div class="mb-3">
+          <label class="form-label fw-bold" data-i18n="auth.fullName">Full name</label>
+          <input type="text" name="full_name" class="form-control" autocomplete="name" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold" data-i18n="auth.email">Email address</label>
+          <input type="email" name="email" class="form-control" autocomplete="email" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold" data-i18n="auth.password">Password</label>
+          <input type="password" name="password" class="form-control" minlength="8" autocomplete="new-password" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold" data-i18n="auth.phone">Phone number</label>
+          <input type="tel" name="phone_number" class="form-control">
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label fw-bold" data-i18n="auth.country">Country</label>
+            <input type="text" name="country" class="form-control" value="Egypt" required>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label fw-bold" data-i18n="auth.city">City</label>
+            <input type="text" name="city" class="form-control" list="egypt-cities" value="Banha" required>
+            <datalist id="egypt-cities">
+              <option value="Cairo">القاهرة</option>
+              <option value="Banha">بنها</option>
+              <option value="Quesna">قويسنا</option>
+              <option value="Alexandria">الإسكندرية</option>
+            </datalist>
+          </div>
+        </div>
+        <div class="form-check form-switch mb-4">
+          <input class="form-check-input" type="checkbox" role="switch" name="prayer_breaks" id="prayerSwitch" checked>
+          <label class="form-check-label fw-bold text-success" for="prayerSwitch" data-i18n="auth.prayerBreaks">Exclude a 20-minute prayer buffer from bookable times</label>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 py-2 mb-3" data-i18n="auth.register">Create account</button>
+        <div class="text-center">
+          <span class="text-muted" data-i18n="auth.haveAccount">Already have an account?</span> <a href="/login" class="text-decoration-none" data-i18n="auth.loginLink">Log in</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

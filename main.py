@@ -1,29 +1,21 @@
 import json
 import os
-from pathlib import Path
+import re
+import urllib.parse
+import urllib.request
 from datetime import datetime, time, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from threading import Lock
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg2
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from psycopg2.extras import RealDictCursor
-
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "local-development-session")
-
-DAY_NAMES = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-]
-TRANSLATIONS_PATH = Path(__file__).with_name("translations.json")
+app.permanent_session_lifetime = timedelta(days=14)
 
 SCHEMA_STATEMENTS = (
     """
@@ -31,20 +23,26 @@ SCHEMA_STATEMENTS = (
         id BIGSERIAL PRIMARY KEY,
         full_name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        booking_link_slug TEXT NOT NULL UNIQUE,
+        phone_number TEXT NOT NULL DEFAULT '',
         bio TEXT NOT NULL DEFAULT '',
-        timezone TEXT NOT NULL DEFAULT 'UTC',
+        timezone TEXT NOT NULL DEFAULT 'Africa/Cairo',
+        country TEXT NOT NULL DEFAULT 'Egypt',
+        city TEXT NOT NULL DEFAULT 'Cairo',
+        prayer_breaks BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS session_types (
         id BIGSERIAL PRIMARY KEY,
-        teacher_id BIGINT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+        teacher_id BIGINT REFERENCES teachers(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 60 CHECK (duration_minutes > 0),
+        link_slug TEXT NOT NULL UNIQUE,
         description TEXT NOT NULL DEFAULT '',
-        duration_minutes INTEGER NOT NULL CHECK (duration_minutes > 0),
-        price NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (price >= 0),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        price NUMERIC(10, 2) NOT NULL DEFAULT 0
     )
     """,
     """
@@ -63,12 +61,12 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS bookings (
         id BIGSERIAL PRIMARY KEY,
         teacher_id BIGINT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-        session_type_id BIGINT NOT NULL REFERENCES session_types(id) ON DELETE CASCADE,
+        session_type_id BIGINT REFERENCES session_types(id) ON DELETE CASCADE,
         student_name TEXT NOT NULL,
         student_email TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 60 CHECK (duration_minutes > 0),
         starts_at TIMESTAMP NOT NULL,
         ends_at TIMESTAMP NOT NULL,
-        notes TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'confirmed'
             CHECK (status IN ('confirmed', 'cancelled')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -78,63 +76,61 @@ SCHEMA_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS bookings_teacher_time_idx
     ON bookings (teacher_id, starts_at, ends_at)
-    """,
     """
-    ALTER TABLE teachers
-    ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''
-    """,
-    """
-    ALTER TABLE teachers
-    ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC'
-    """,
-    """
-    ALTER TABLE session_types
-    ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''
-    """,
-    """
-    ALTER TABLE session_types
-    ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) NOT NULL DEFAULT 0
-    """,
+)
+
+ALTER_STATEMENTS = (
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS full_name TEXT;",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS email TEXT;",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '!';",
+    "UPDATE teachers SET password_hash = '!' WHERE password_hash IS NULL;",
+    "ALTER TABLE teachers ALTER COLUMN password_hash SET DEFAULT '!';",
+    "ALTER TABLE teachers ALTER COLUMN password_hash SET NOT NULL;",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS booking_link_slug TEXT;",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS phone_number TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'Africa/Cairo';",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'Egypt';",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT 'Cairo';",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS prayer_breaks BOOLEAN NOT NULL DEFAULT TRUE;",
+    "ALTER TABLE session_types ADD COLUMN IF NOT EXISTS link_slug TEXT;",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 60;",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS session_type_id BIGINT;"
 )
 
 _schema_lock = Lock()
 _schema_ready = False
 
-
 class DatabaseUnavailable(RuntimeError):
-    """Raised when the Supabase/Postgres connection is not configured or reachable."""
-
+    pass
 
 def connect_db():
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise DatabaseUnavailable("DATABASE_URL is not configured.")
-
     try:
         return psycopg2.connect(database_url, connect_timeout=5)
     except psycopg2.Error as exc:
         raise DatabaseUnavailable("The database is not reachable.") from exc
 
-
 def ensure_schema():
     global _schema_ready
     if _schema_ready:
         return
-
     with _schema_lock:
         if _schema_ready:
             return
-
         connection = connect_db()
         try:
             with connection:
                 with connection.cursor() as cursor:
                     for statement in SCHEMA_STATEMENTS:
                         cursor.execute(statement)
+                    for statement in ALTER_STATEMENTS:
+                        cursor.execute(statement)
             _schema_ready = True
         finally:
             connection.close()
-
 
 def fetch_all(statement, params=()):
     connection = connect_db()
@@ -145,141 +141,81 @@ def fetch_all(statement, params=()):
     finally:
         connection.close()
 
-
-def json_value(value):
-    if isinstance(value, (datetime, time)):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, list):
-        return [json_value(item) for item in value]
-    if isinstance(value, dict):
-        return {key: json_value(item) for key, item in value.items()}
-    return value
-
-
-def request_data():
-    if request.is_json:
-        return request.get_json(silent=True) or {}
-    return request.form
-
-
-def value(data, key, default=""):
-    raw = data.get(key, default)
-    return str(raw).strip() if raw is not None else default
-
-
-def positive_int(data, key):
+def active_teacher_id():
+    raw_teacher_id = session.get("active_teacher_id")
+    if raw_teacher_id is None:
+        return None
     try:
-        parsed = int(value(data, key))
+        teacher_id = int(raw_teacher_id)
     except (TypeError, ValueError):
-        raise ValueError(f"{key} must be a positive integer.")
-    if parsed <= 0:
-        raise ValueError(f"{key} must be a positive integer.")
-    return parsed
+        return None
+    return teacher_id if teacher_id > 0 else None
 
 
-def wants_json():
-    accept = request.headers.get("Accept", "")
-    return (
-        request.is_json
-        or request.args.get("format") == "json"
-        or request.form.get("_format") == "json"
-        or "application/json" in accept
-    )
+def slugify(value, fallback):
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or fallback
 
 
-def success_response(payload, redirect_endpoint, status=201, **redirect_values):
-    if wants_json():
-        return jsonify(json_value(payload)), status
-    flash(payload.get("message_key", payload.get("message", "Saved successfully.")), "success")
-    return redirect(url_for(redirect_endpoint, **redirect_values))
+def teacher_booking_slug(email):
+    return slugify(email, "teacher")
 
 
-def error_response(message, status, redirect_endpoint=None, **redirect_values):
-    if wants_json() or redirect_endpoint is None:
-        return jsonify({"error": message}), status
-    flash(message, "error")
-    return redirect(url_for(redirect_endpoint, **redirect_values))
-
-
-def database_error(endpoint=None):
-    app.logger.exception("Database operation failed")
-    return error_response(
-        "The database is temporarily unavailable. Please try again.",
-        503,
-        endpoint,
-    )
-
-
-def parse_time(raw, field_name):
+def get_prayer_times(city, country, date_str):
     try:
-        return datetime.strptime(raw, "%H:%M").time()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must use HH:MM format.") from exc
+        query = urllib.parse.urlencode(
+            {"city": city, "country": country, "method": 5}
+        )
+        url = f"https://api.aladhan.com/v1/timingsByCity/{date_str}?{query}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Maw3edy/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            timings = data.get('data', {}).get('timings', {})
+            prayers = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']
+            return [
+                str(timings[prayer]).split()[0]
+                for prayer in prayers
+                if timings.get(prayer)
+            ]
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return []
 
 
-def parse_start_datetime(raw):
+def parse_utc_datetime(raw):
     if not raw:
-        raise ValueError("starts_at is required.")
+        raise ValueError("A booking time is required.")
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError as exc:
-        raise ValueError("starts_at must be a valid ISO date and time.") from exc
-
+        raise ValueError("Booking time must be a valid ISO timestamp.") from exc
     if parsed.tzinfo is None:
-        raise ValueError("starts_at must include a timezone.")
-    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
+        raise ValueError("Booking time must include a timezone.")
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def parse_timezone(raw):
-    timezone_name = raw or "UTC"
-    try:
-        ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError("timezone must be a valid IANA timezone.") from exc
-    return timezone_name
-
-
-def load_translations():
-    try:
-        with TRANSLATIONS_PATH.open(encoding="utf-8") as translations_file:
-            return json.load(translations_file)
-    except (OSError, json.JSONDecodeError):
-        app.logger.exception("Could not load translations.json")
-        return {}
-
-
-def fetch_dashboard_data():
-    teachers = fetch_all(
-        """
-        SELECT id, full_name, email, bio, timezone, created_at
-        FROM teachers
-        ORDER BY full_name
-        """
-    )
-    session_types = fetch_all(
-        """
-        SELECT st.id, st.teacher_id, st.title, st.description,
-               st.duration_minutes, st.price, st.created_at,
-               t.full_name AS teacher_name
-        FROM session_types st
-        JOIN teachers t ON t.id = st.teacher_id
-        ORDER BY t.full_name, st.title
-        """
-    )
-    availability = fetch_all(
-        """
-        SELECT a.id, a.teacher_id, a.day_of_week, a.start_time, a.end_time,
-               t.full_name AS teacher_name, t.timezone
-        FROM availability a
-        JOIN teachers t ON t.id = a.teacher_id
-        ORDER BY t.full_name, a.day_of_week, a.start_time
-        """
-    )
-    return teachers, session_types, availability
-
+def prayer_overlap(starts_at, ends_at, teacher, teacher_timezone):
+    local_start = starts_at.replace(tzinfo=timezone.utc).astimezone(teacher_timezone)
+    date_string = local_start.strftime("%d-%m-%Y")
+    for prayer_time in get_prayer_times(
+        teacher["city"],
+        teacher["country"],
+        date_string,
+    ):
+        try:
+            prayer_start = datetime.strptime(
+                f"{local_start.date().isoformat()}T{prayer_time}",
+                "%Y-%m-%dT%H:%M",
+            ).replace(tzinfo=teacher_timezone)
+        except ValueError:
+            continue
+        prayer_start_utc = prayer_start.astimezone(timezone.utc).replace(tzinfo=None)
+        prayer_end_utc = prayer_start_utc + timedelta(minutes=20)
+        if starts_at < prayer_end_utc and ends_at > prayer_start_utc:
+            return True
+    return False
 
 @app.get("/")
 def home():
@@ -288,521 +224,350 @@ def home():
         ensure_schema()
         database_ready = True
     except DatabaseUnavailable:
-        app.logger.exception("Homepage database check failed")
-
+        pass
     return render_template("index.html", database_ready=database_ready)
 
+@app.get("/login")
+def login_page():
+    return render_template("login.html")
 
-@app.get("/translations.json")
-def translations():
-    return jsonify(load_translations())
+@app.post("/login")
+@app.post("/api/login")
+def login_teacher():
+    data = request.form or (request.get_json(silent=True) or {})
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
 
+    try:
+        ensure_schema()
+        conn = connect_db()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT * FROM teachers WHERE email = %s", (email,))
+                teacher = cursor.fetchone()
+        finally:
+            conn.close()
+
+        stored_hash = teacher.get("password_hash") if teacher else None
+        if stored_hash and check_password_hash(stored_hash, password):
+            session.clear()
+            session["active_teacher_id"] = teacher["id"]
+            session.permanent = True
+            return redirect(url_for("dashboard"))
+        return render_template("login.html", error_key="auth.invalidCredentials"), 401
+    except (DatabaseUnavailable, psycopg2.Error):
+        app.logger.exception("Login failed")
+        return render_template("login.html", error_key="auth.databaseError"), 503
+
+@app.get("/register")
+def register_page():
+    return render_template("register.html")
+
+@app.post("/register")
+@app.post("/api/register")
+def register_teacher():
+    data = request.form or (request.get_json(silent=True) or {})
+    full_name = str(data.get("full_name", "")).strip()
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    phone_number = str(data.get("phone_number", "")).strip()
+    country = str(data.get("country", "Egypt")).strip() or "Egypt"
+    city = str(data.get("city", "Cairo")).strip() or "Cairo"
+    bio = str(data.get("bio", "")).strip()
+    prayer_breaks = data.get("prayer_breaks") in ("true", "on", True, 1, "1")
+
+    if not full_name or "@" not in email or len(password) < 8:
+        return render_template("register.html", error_key="auth.registrationRequirements"), 400
+
+    hashed_password = generate_password_hash(password)
+    booking_link_slug = teacher_booking_slug(email)
+
+    try:
+        ensure_schema()
+        conn = connect_db()
+        try:
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO teachers
+                            (full_name, email, password_hash, booking_link_slug,
+                             phone_number, bio, country, city, prayer_breaks)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            full_name,
+                            email,
+                            hashed_password,
+                            booking_link_slug,
+                            phone_number,
+                            bio,
+                            country,
+                            city,
+                            prayer_breaks,
+                        ),
+                    )
+                    teacher = dict(cursor.fetchone())
+        finally:
+            conn.close()
+
+        session.clear()
+        session["active_teacher_id"] = teacher["id"]
+        session.permanent = True
+        return redirect(url_for("dashboard"))
+    except psycopg2.IntegrityError:
+        app.logger.exception("Teacher registration rejected")
+        return render_template("register.html", error_key="auth.emailTaken"), 409
+    except (DatabaseUnavailable, psycopg2.Error):
+        app.logger.exception("Teacher registration failed")
+        return render_template("register.html", error_key="auth.databaseError"), 503
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login_page"))
 
 @app.get("/dashboard")
 def dashboard():
-    selected_teacher_id = request.args.get("teacher_id", type=int)
+    active_id = active_teacher_id()
+    if not active_id:
+        return redirect(url_for("login_page"))
+
     try:
         ensure_schema()
-        teachers, session_types, availability = fetch_dashboard_data()
-        database_ready = True
+        teachers = fetch_all("SELECT * FROM teachers WHERE id = %s", (active_id,))
+        availability = fetch_all(
+            """
+            SELECT a.*, t.full_name AS teacher_name 
+            FROM availability a 
+            JOIN teachers t ON t.id = a.teacher_id 
+            WHERE a.teacher_id = %s
+            ORDER BY a.day_of_week, a.start_time
+            """,
+            (active_id,)
+        )
     except DatabaseUnavailable:
-        app.logger.exception("Dashboard database load failed")
-        teachers, session_types, availability = [], [], []
-        database_ready = False
+        teachers, availability = [], []
 
+    active_teacher = teachers[0] if teachers else None
+    if active_teacher is None:
+        session.clear()
+        return redirect(url_for("login_page"))
     return render_template(
         "dashboard.html",
-        teachers=teachers,
-        session_types=session_types,
+        active_teacher=active_teacher,
         availability=availability,
-        selected_teacher_id=selected_teacher_id,
-        database_ready=database_ready,
     )
 
+@app.post("/api/update-profile")
+def update_profile():
+    active_id = active_teacher_id()
+    if not active_id:
+        return redirect(url_for("login_page"))
+
+    full_name = request.form.get("full_name", "").strip()
+    phone_number = request.form.get("phone_number", "").strip()
+    bio = request.form.get("bio", "").strip()
+    country = request.form.get("country", "Egypt").strip()
+    city = request.form.get("city", "Cairo").strip()
+    prayer_breaks = True if request.form.get("prayer_breaks") in ['true', 'on', True] else False
+
+    try:
+        ensure_schema()
+        conn = connect_db()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE teachers 
+                        SET full_name = %s, bio = %s, phone_number = %s,
+                            country = %s, city = %s, prayer_breaks = %s
+                        WHERE id = %s
+                        """,
+                        (
+                            full_name,
+                            bio,
+                            phone_number,
+                            country,
+                            city,
+                            prayer_breaks,
+                            active_id,
+                        )
+                    )
+        finally:
+            conn.close()
+        return redirect(url_for("dashboard"))
+    except Exception:
+        return redirect(url_for("dashboard"))
 
 @app.get("/book")
 def book():
     try:
         ensure_schema()
+        teachers = fetch_all("SELECT id, full_name, timezone, country, city, prayer_breaks FROM teachers")
+        availability = fetch_all("SELECT * FROM availability")
+        bookings = fetch_all(
+            """
+            SELECT teacher_id, session_type_id, starts_at, ends_at
+            FROM bookings
+            WHERE status = 'confirmed'
+            """
+        )
         session_types = fetch_all(
             """
-            SELECT st.id, st.teacher_id, st.title, st.description,
-                   st.duration_minutes, st.price, t.full_name AS teacher_name
-            FROM session_types st
-            JOIN teachers t ON t.id = st.teacher_id
-            ORDER BY t.full_name, st.title
+            SELECT id, teacher_id, title, duration_minutes, description
+            FROM session_types
+            ORDER BY teacher_id, title
             """
         )
-        availability = fetch_all(
-            """
-            SELECT a.teacher_id, a.day_of_week, a.start_time, a.end_time,
-                   t.full_name AS teacher_name, t.timezone
-            FROM availability a
-            JOIN teachers t ON t.id = a.teacher_id
-            ORDER BY t.full_name, a.day_of_week, a.start_time
-            """
-        )
-        database_ready = True
     except DatabaseUnavailable:
-        app.logger.exception("Booking page database load failed")
-        session_types, availability = [], []
-        database_ready = False
+        teachers, availability, bookings, session_types = [], [], [], []
 
     return render_template(
         "book.html",
-        session_types=session_types,
+        teachers=teachers,
         availability=availability,
-        database_ready=database_ready,
+        bookings=bookings,
+        session_types=session_types,
     )
 
-
-@app.get("/api/teachers")
-def list_teachers():
-    try:
-        ensure_schema()
-        return jsonify(json_value(fetch_all(
-            """
-            SELECT id, full_name, email, bio, timezone, created_at
-            FROM teachers
-            ORDER BY full_name
-            """
-        )))
-    except DatabaseUnavailable:
-        return database_error()
-
-
-@app.post("/api/teachers")
-def register_teacher():
-    data = request_data()
-    full_name = value(data, "full_name")
-    email = value(data, "email").lower()
-    bio = value(data, "bio")
-    try:
-        teacher_timezone = parse_timezone(value(data, "timezone", "UTC"))
-    except ValueError as exc:
-        return error_response(str(exc), 400, "dashboard")
-
-    if not full_name or not email or "@" not in email:
-        return error_response(
-            "A teacher name and valid email are required.",
-            400,
-            "dashboard",
-        )
-
-    try:
-        ensure_schema()
-        connection = connect_db()
-        try:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute(
-                        """
-                        INSERT INTO teachers (full_name, email, bio, timezone)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (email) DO UPDATE
-                        SET full_name = EXCLUDED.full_name,
-                            bio = EXCLUDED.bio,
-                            timezone = EXCLUDED.timezone
-                        RETURNING id, full_name, email, bio, timezone, created_at
-                        """,
-                        (full_name, email, bio, teacher_timezone),
-                    )
-                    teacher = dict(cursor.fetchone())
-        finally:
-            connection.close()
-
-        teacher_id = teacher["id"]
-        return success_response(
-            {
-                "message": "Teacher profile saved.",
-                "message_key": "messages.teacherSaved",
-                "teacher": teacher,
-            },
-            "dashboard",
-            teacher_id=teacher_id,
-        )
-    except DatabaseUnavailable:
-        return database_error("dashboard")
-    except psycopg2.Error:
-        app.logger.exception("Teacher registration failed")
-        return error_response("Teacher profile could not be saved.", 400, "dashboard")
-
-
-@app.get("/api/session-types")
-def list_session_types():
-    try:
-        ensure_schema()
-        return jsonify(json_value(fetch_all(
-            """
-            SELECT st.id, st.teacher_id, st.title, st.description,
-                   st.duration_minutes, st.price, t.full_name AS teacher_name
-            FROM session_types st
-            JOIN teachers t ON t.id = st.teacher_id
-            ORDER BY t.full_name, st.title
-            """
-        )))
-    except DatabaseUnavailable:
-        return database_error()
-
-
-@app.post("/api/session-types")
-def create_session_type():
-    data = request_data()
-    title = value(data, "title")
-    description = value(data, "description")
-
-    try:
-        teacher_id = positive_int(data, "teacher_id")
-        duration_minutes = positive_int(data, "duration_minutes")
-        price = Decimal(value(data, "price", "0") or "0")
-        if duration_minutes > 480:
-            raise ValueError("duration_minutes cannot exceed 480.")
-        if price < 0:
-            raise ValueError("price cannot be negative.")
-    except (InvalidOperation, ValueError) as exc:
-        return error_response(str(exc), 400, "dashboard")
-
-    if not title:
-        return error_response("A session title is required.", 400, "dashboard")
-
-    try:
-        ensure_schema()
-        connection = connect_db()
-        try:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute(
-                        "SELECT id FROM teachers WHERE id = %s",
-                        (teacher_id,),
-                    )
-                    if cursor.fetchone() is None:
-                        return error_response(
-                            "The selected teacher does not exist.",
-                            404,
-                            "dashboard",
-                        )
-                    cursor.execute(
-                        """
-                        INSERT INTO session_types
-                            (teacher_id, title, description, duration_minutes, price)
-                        VALUES (%s, %s, %s, %s, %s)
-                        RETURNING id, teacher_id, title, description,
-                                  duration_minutes, price, created_at
-                        """,
-                        (
-                            teacher_id,
-                            title,
-                            description,
-                            duration_minutes,
-                            price,
-                        ),
-                    )
-                    session_type = dict(cursor.fetchone())
-        finally:
-            connection.close()
-
-        return success_response(
-            {
-                "message": "Session type created.",
-                "message_key": "messages.sessionCreated",
-                "session_type": session_type,
-            },
-            "dashboard",
-            teacher_id=teacher_id,
-        )
-    except DatabaseUnavailable:
-        return database_error("dashboard")
-    except psycopg2.Error:
-        app.logger.exception("Session type creation failed")
-        return error_response("Session type could not be created.", 400, "dashboard")
-
-
-@app.get("/api/availability")
-def list_availability():
+@app.get("/api/prayer-times")
+def api_prayer_times():
     teacher_id = request.args.get("teacher_id", type=int)
-    try:
-        ensure_schema()
-        if teacher_id:
-            slots = fetch_all(
-                """
-                SELECT a.id, a.teacher_id, a.day_of_week, a.start_time,
-                       a.end_time, a.created_at, t.timezone
-                FROM availability
-                JOIN teachers t ON t.id = availability.teacher_id
-                WHERE teacher_id = %s
-                ORDER BY day_of_week, start_time
-                """,
+    date_str = request.args.get("date", datetime.now().strftime("%d-%m-%Y"))
+    if teacher_id:
+        try:
+            teacher = fetch_all(
+                "SELECT city, country FROM teachers WHERE id = %s",
                 (teacher_id,),
             )
-        else:
-            slots = fetch_all(
-                """
-                SELECT a.id, a.teacher_id, a.day_of_week, a.start_time,
-                       a.end_time, a.created_at, t.timezone
-                FROM availability a
-                JOIN teachers t ON t.id = a.teacher_id
-                ORDER BY teacher_id, day_of_week, start_time
-                """
-            )
-        return jsonify(json_value(slots))
-    except DatabaseUnavailable:
-        return database_error()
-
-
-@app.get("/api/slots")
-def list_slots():
-    try:
-        session_type_id = request.args.get("session_type_id", type=int)
-        days = request.args.get("days", default=14, type=int)
-        if not session_type_id or session_type_id <= 0:
-            return error_response("session_type_id must be a positive integer.", 400)
-        days = min(max(days, 1), 31)
-
-        ensure_schema()
-        session_types = fetch_all(
-            """
-            SELECT st.id, st.title, st.teacher_id, st.duration_minutes,
-                   t.full_name AS teacher_name, t.timezone
-            FROM session_types st
-            JOIN teachers t ON t.id = st.teacher_id
-            WHERE st.id = %s
-            """,
-            (session_type_id,),
-        )
-        if not session_types:
-            return error_response("The selected session type does not exist.", 404)
-
-        session_type = session_types[0]
-        teacher_timezone = ZoneInfo(session_type["timezone"] or "UTC")
-        availability = fetch_all(
-            """
-            SELECT day_of_week, start_time, end_time
-            FROM availability
-            WHERE teacher_id = %s
-            ORDER BY day_of_week, start_time
-            """,
-            (session_type["teacher_id"],),
-        )
-        bookings = fetch_all(
-            """
-            SELECT starts_at, ends_at
-            FROM bookings
-            WHERE teacher_id = %s AND status = 'confirmed'
-              AND starts_at >= %s
-              AND starts_at < %s
-            """,
-            (
-                session_type["teacher_id"],
-                datetime.now(timezone.utc).replace(tzinfo=None),
-                (
-                    datetime.now(timezone.utc).replace(tzinfo=None)
-                    + timedelta(days=days + 2)
-                ),
-            ),
-        )
-
-        now_utc = datetime.now(timezone.utc)
-        teacher_today = now_utc.astimezone(teacher_timezone).date()
-        duration = timedelta(minutes=session_type["duration_minutes"])
-        slots = []
-
-        for day_offset in range(days + 1):
-            local_date = teacher_today + timedelta(days=day_offset)
-            local_day = (local_date.weekday() + 1) % 7
-            for window in availability:
-                if window["day_of_week"] != local_day:
-                    continue
-                local_start = datetime.combine(
-                    local_date,
-                    window["start_time"],
-                    tzinfo=teacher_timezone,
-                )
-                local_end = datetime.combine(
-                    local_date,
-                    window["end_time"],
-                    tzinfo=teacher_timezone,
-                )
-                candidate = local_start
-                while candidate + duration <= local_end:
-                    utc_start = candidate.astimezone(timezone.utc)
-                    utc_end = (candidate + duration).astimezone(timezone.utc)
-                    naive_start = utc_start.replace(tzinfo=None)
-                    naive_end = utc_end.replace(tzinfo=None)
-                    is_booked = any(
-                        booking["starts_at"] < naive_end
-                        and booking["ends_at"] > naive_start
-                        for booking in bookings
-                    )
-                    if utc_start > now_utc and not is_booked:
-                        slots.append(
-                            {
-                                "starts_at": utc_start.isoformat().replace(
-                                    "+00:00", "Z"
-                                ),
-                                "ends_at": utc_end.isoformat().replace(
-                                    "+00:00", "Z"
-                                ),
-                                "teacher_name": session_type["teacher_name"],
-                                "teacher_timezone": session_type["timezone"],
-                                "session_title": session_type["title"],
-                            }
-                        )
-                    candidate += timedelta(minutes=30)
-
-        slots.sort(key=lambda slot: slot["starts_at"])
-        return jsonify(
-            {
-                "timezone": "UTC",
-                "teacher_timezone": session_type["timezone"],
-                "slots": slots,
-            }
-        )
-    except DatabaseUnavailable:
-        return database_error()
-    except ZoneInfoNotFoundError:
-        return error_response("The teacher timezone is invalid.", 500)
-
+        except DatabaseUnavailable:
+            return jsonify({"error": "The database is unavailable."}), 503
+        if not teacher:
+            return jsonify({"error": "Teacher not found."}), 404
+        city, country = teacher[0]["city"], teacher[0]["country"]
+    else:
+        city = request.args.get("city", "Cairo")
+        country = request.args.get("country", "Egypt")
+    times = get_prayer_times(city, country, date_str)
+    return jsonify(
+        {
+            "city": city,
+            "country": country,
+            "date": date_str,
+            "prayer_times": times,
+        }
+    )
 
 @app.post("/api/availability")
 def set_availability():
-    data = request_data()
-    try:
-        teacher_id = positive_int(data, "teacher_id")
-        day_of_week = int(value(data, "day_of_week"))
-        if day_of_week not in range(7):
-            raise ValueError("day_of_week must be between 0 and 6.")
-        start_time = parse_time(value(data, "start_time"), "start_time")
-        end_time = parse_time(value(data, "end_time"), "end_time")
-        if start_time >= end_time:
-            raise ValueError("end_time must be later than start_time.")
-    except (TypeError, ValueError) as exc:
-        return error_response(str(exc), 400, "dashboard")
+    teacher_id = active_teacher_id()
+    if not teacher_id:
+        return redirect(url_for("login_page"))
+
+    day_of_week = int(request.form.get("day_of_week", 0))
+    start_time = request.form.get("start_time")
+    end_time = request.form.get("end_time")
 
     try:
         ensure_schema()
-        connection = connect_db()
+        conn = connect_db()
         try:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute(
-                        "SELECT id FROM teachers WHERE id = %s",
-                        (teacher_id,),
-                    )
-                    if cursor.fetchone() is None:
-                        return error_response(
-                            "The selected teacher does not exist.",
-                            404,
-                            "dashboard",
-                        )
+            with conn:
+                with conn.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO availability
-                            (teacher_id, day_of_week, start_time, end_time)
+                        INSERT INTO availability (teacher_id, day_of_week, start_time, end_time)
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT DO NOTHING
-                        RETURNING id, teacher_id, day_of_week, start_time, end_time
                         """,
-                        (teacher_id, day_of_week, start_time, end_time),
+                        (teacher_id, day_of_week, start_time, end_time)
                     )
-                    slot = cursor.fetchone()
-                    if slot is None:
-                        return error_response(
-                            "That availability window already exists.",
-                            409,
-                            "dashboard",
-                        )
-                    slot = dict(slot)
         finally:
-            connection.close()
-
-        return success_response(
-            {
-                "message": "Availability saved.",
-                "message_key": "messages.availabilitySaved",
-                "availability": slot,
-            },
-            "dashboard",
-            teacher_id=teacher_id,
-        )
+            conn.close()
+        return redirect(url_for("dashboard"))
     except DatabaseUnavailable:
-        return database_error("dashboard")
-    except psycopg2.Error:
-        app.logger.exception("Availability creation failed")
-        return error_response("Availability could not be saved.", 400, "dashboard")
-
-
-@app.get("/api/bookings")
-def list_bookings():
-    try:
-        ensure_schema()
-        bookings = fetch_all(
-            """
-            SELECT b.id, b.teacher_id, b.session_type_id, b.student_name,
-                   b.student_email, b.starts_at, b.ends_at, b.notes, b.status,
-                   st.title AS session_title, t.full_name AS teacher_name
-            FROM bookings b
-            JOIN session_types st ON st.id = b.session_type_id
-            JOIN teachers t ON t.id = b.teacher_id
-            ORDER BY b.starts_at
-            """
-        )
-        return jsonify(json_value(bookings))
-    except DatabaseUnavailable:
-        return database_error()
-
+        return jsonify({"error": "خطأ في الاتصال بقاعدة البيانات"}), 503
 
 @app.post("/api/bookings")
 def create_booking():
-    data = request_data()
-    student_name = value(data, "student_name")
-    student_email = value(data, "student_email").lower()
-    notes = value(data, "notes")
+    data = request.form if request.form else (request.get_json(silent=True) or {})
 
-    if not student_name or not student_email or "@" not in student_email:
-        return error_response(
-            "A student name and valid email are required.",
-            400,
-            "book",
-        )
+    raw_teacher_id = data.get("teacher_id")
+    if not raw_teacher_id:
+        return jsonify({"error": "Teacher information is required."}), 400
+    try:
+        teacher_id = int(raw_teacher_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Teacher information is invalid."}), 400
+
+    student_name = str(data.get("student_name", "")).strip()
+    student_email = str(data.get("student_email", "")).strip().lower()
+    notes = str(data.get("notes", "")).strip()
+
+    if not student_name or "@" not in student_email:
+        return jsonify({"error": "A student name and valid email are required."}), 400
 
     try:
-        session_type_id = positive_int(data, "session_type_id")
-        starts_at = parse_start_datetime(value(data, "starts_at"))
+        starts_at = parse_utc_datetime(data.get("starts_at"))
     except ValueError as exc:
-        return error_response(str(exc), 400, "book")
-
-    if starts_at <= datetime.now(timezone.utc).replace(tzinfo=None):
-        return error_response("Bookings must be scheduled in the future.", 400, "book")
+        return jsonify({"error": str(exc)}), 400
 
     try:
         ensure_schema()
-        connection = connect_db()
+        conn = connect_db()
         try:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute(
                         """
-                        SELECT st.id, st.teacher_id, st.duration_minutes, st.title,
-                               t.timezone
-                        FROM session_types st
-                        JOIN teachers t ON t.id = st.teacher_id
-                        WHERE st.id = %s
+                        SELECT id, city, country, timezone, prayer_breaks
+                        FROM teachers
+                        WHERE id = %s
                         """,
-                        (session_type_id,),
+                        (teacher_id,),
                     )
-                    session_type = cursor.fetchone()
-                    if session_type is None:
-                        return error_response(
-                            "The selected session type does not exist.",
-                            404,
-                            "book",
-                        )
+                    teacher = cursor.fetchone()
+                    if teacher is None:
+                        return jsonify({"error": "Teacher not found."}), 404
 
-                    teacher_id = session_type["teacher_id"]
-                    ends_at = starts_at + timedelta(
-                        minutes=session_type["duration_minutes"]
-                    )
-                    teacher_timezone = ZoneInfo(session_type["timezone"] or "UTC")
+                    raw_session_type_id = data.get("session_type_id")
+                    if raw_session_type_id:
+                        try:
+                            session_type_id = int(raw_session_type_id)
+                        except (TypeError, ValueError):
+                            return jsonify({"error": "Session type is invalid."}), 400
+                        cursor.execute(
+                            """
+                            SELECT id, duration_minutes
+                            FROM session_types
+                            WHERE id = %s AND teacher_id = %s
+                            """,
+                            (session_type_id, teacher_id),
+                        )
+                        session_type = cursor.fetchone()
+                    else:
+                        cursor.execute(
+                            """
+                            SELECT id, duration_minutes
+                            FROM session_types
+                            WHERE teacher_id = %s
+                            ORDER BY id
+                            LIMIT 1
+                            """,
+                            (teacher_id,),
+                        )
+                        session_type = cursor.fetchone()
+                        session_type_id = session_type["id"] if session_type else None
+
+                    if session_type is None:
+                        return jsonify({"error": "This teacher has no published session type."}), 400
+
+                    duration_minutes = int(session_type["duration_minutes"])
+                    ends_at = starts_at + timedelta(minutes=duration_minutes)
+                    teacher_timezone = ZoneInfo(teacher["timezone"] or "UTC")
                     local_start = starts_at.replace(
                         tzinfo=timezone.utc
                     ).astimezone(teacher_timezone)
@@ -810,19 +575,12 @@ def create_booking():
                         tzinfo=timezone.utc
                     ).astimezone(teacher_timezone)
                     if local_start.date() != local_end.date():
-                        return error_response(
-                            "The session must finish on the same local day.",
-                            409,
-                            "book",
-                        )
-                    day_of_week = (local_start.weekday() + 1) % 7
+                        return jsonify({"error": "The session must finish on the same local day."}), 409
 
-                    # Serialize bookings for one teacher to prevent double booking
-                    # when two students submit the same time at once.
-                    cursor.execute(
-                        "SELECT pg_advisory_xact_lock(%s)",
-                        (teacher_id,),
-                    )
+                    if starts_at <= datetime.now(timezone.utc).replace(tzinfo=None):
+                        return jsonify({"error": "Bookings must be scheduled in the future."}), 400
+
+                    day_of_week = (local_start.weekday() + 1) % 7
                     cursor.execute(
                         """
                         SELECT 1
@@ -841,12 +599,17 @@ def create_booking():
                         ),
                     )
                     if cursor.fetchone() is None:
-                        return error_response(
-                            "That time is outside the teacher's availability.",
-                            409,
-                            "book",
-                        )
+                        return jsonify({"error": "The selected time is outside the teacher's availability."}), 409
 
+                    if teacher["prayer_breaks"] and prayer_overlap(
+                        starts_at,
+                        ends_at,
+                        teacher,
+                        teacher_timezone,
+                    ):
+                        return jsonify({"error": "The selected time overlaps a prayer break."}), 409
+
+                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (teacher_id,))
                     cursor.execute(
                         """
                         SELECT 1
@@ -860,49 +623,36 @@ def create_booking():
                         (teacher_id, ends_at, starts_at),
                     )
                     if cursor.fetchone() is not None:
-                        return error_response(
-                            "That time is already booked.",
-                            409,
-                            "book",
-                        )
+                        return jsonify({"error": "That time has already been booked."}), 409
 
                     cursor.execute(
                         """
                         INSERT INTO bookings
-                            (teacher_id, session_type_id, student_name,
-                             student_email, starts_at, ends_at, notes)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id, teacher_id, session_type_id, student_name,
-                                  student_email, starts_at, ends_at, notes, status
+                            (teacher_id, session_type_id, student_name, student_email,
+                             duration_minutes, starts_at, ends_at, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             teacher_id,
                             session_type_id,
                             student_name,
                             student_email,
+                            duration_minutes,
                             starts_at,
                             ends_at,
                             notes,
-                        ),
+                        )
                     )
-                    booking = dict(cursor.fetchone())
         finally:
-            connection.close()
-
-        return success_response(
-            {
-                "message": "Booking confirmed.",
-                "message_key": "messages.bookingConfirmed",
-                "booking": booking,
-            },
-            "book",
-        )
+            conn.close()
+        return jsonify({"success": True, "message": "Booking confirmed."})
+    except ZoneInfoNotFoundError:
+        return jsonify({"error": "The teacher timezone is invalid."}), 500
     except DatabaseUnavailable:
-        return database_error("book")
+        return jsonify({"error": "The database is unavailable."}), 503
     except psycopg2.Error:
         app.logger.exception("Booking creation failed")
-        return error_response("Booking could not be created.", 400, "book")
-
+        return jsonify({"error": "The booking could not be saved."}), 400
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
