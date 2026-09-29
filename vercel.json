@@ -1,0 +1,14 @@
+{
+  "builds": [
+    {
+      "src": "maw3edy/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "maw3edy/main.py"
+    }
+  ]
+}
