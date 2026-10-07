@@ -5,244 +5,200 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="page.bookTitle">Book a session | Maw3edy</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" data-bootstrap-css>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.3.0/luxon.min.js"></script>
 </head>
 <body class="bg-light">
-  <div class="container py-5">
+<div class="container py-5">
     <div class="text-center mb-5">
-      <h1 class="fw-bold text-primary" data-i18n="book.heading">Choose a time that works for you.</h1>
-      <p class="text-muted" data-i18n="book.description">Select a session, share your details, and request a time inside the teacher's availability.</p>
-      <div class="badge bg-secondary fs-6" id="student-timezone-display">Local timezone</div>
+        <h1 class="fw-bold text-primary" data-i18n="book.heading">Choose a time that works for you.</h1>
+        <p class="text-muted" data-i18n="book.description">Select a session, share your details, and request a booking.</p>
+        <div class="badge bg-secondary fs-6" id="student-timezone-display">Local timezone</div>
     </div>
 
     <div class="row justify-content-center">
-      <div class="col-md-8">
-        <div class="card shadow-sm border-0 p-4">
-          <form id="booking-form" action="/api/bookings" method="POST">
-            <!-- 1. اختيار المعلم -->
-            <div class="mb-4">
-              <label class="form-label fw-bold" data-i18n="book.teacher">Choose a teacher</label>
-              <select name="teacher_id" id="teacher-select" class="form-select form-select-lg" required onchange="updateAvailableDays()">
-                <option value="" disabled selected data-i18n="book.chooseTeacher">Choose a teacher</option>
-                {% for teacher in teachers %}
-                  <option value="{{ teacher.id }}" data-tz="{{ teacher.timezone }}" data-country="{{ teacher.country }}" data-city="{{ teacher.city }}" data-prayer="{{ 'true' if teacher.prayer_breaks else 'false' }}">
-                    {{ teacher.full_name }}
-                  </option>
-                {% endfor %}
-              </select>
-            </div>
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0 p-4">
+                <form id="booking-form" action="/api/bookings" method="POST">
+                    <!-- 1. اختيار المعلم -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold" data-i18n="book.teacher">Choose a teacher</label>
+                        <select name="teacher_id" id="teacher-select" class="form-select form-select-lg" required>
+                            <option value="" disabled selected data-i18n="book.chooseTeacher">Choose a teacher</option>
+                            {% for teacher in teachers %}
+                            <option value="{{ teacher.id }}" data-tz="{{ teacher.timezone }}" data-country="{{ teacher.country }}" data-city="{{ teacher.city }}" data-slug="{{ teacher.booking_link_slug }}" data-prayer="{{ 'true' if teacher.prayer_breaks else 'false' }}">
+                                {{ teacher.full_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-            <!-- 2. اختيار مدة الحصة -->
-            <div class="mb-4">
-              <label class="form-label fw-bold" data-i18n="book.duration">Session duration</label>
-              <div class="d-flex gap-3">
-                <div class="form-check">
-                  <input class="form-check-input" type="radio" name="duration_minutes" id="dur30" value="30">
-                  <label class="form-check-label" for="dur30">30 minutes</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="radio" name="duration_minutes" id="dur45" value="45">
-                  <label class="form-check-label" for="dur45">45 minutes</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="radio" name="duration_minutes" id="dur60" value="60" checked>
-                  <label class="form-check-label" for="dur60">60 minutes</label>
-                </div>
-              </div>
-            </div>
+                    <!-- 2. اختيار مدة الحصة -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold" data-i18n="book.duration">Session duration</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="duration_minutes" id="dur30" value="30" checked>
+                                <label class="form-check-label" for="dur30">30 minutes</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="duration_minutes" id="dur45" value="45">
+                                <label class="form-check-label" for="dur45">45 minutes</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="duration_minutes" id="dur60" value="60">
+                                <label class="form-check-label" for="dur60">60 minutes</label>
+                            </div>
+                        </div>
+                    </div>
 
-            <!-- 3. اختيار التاريخ -->
-            <div class="mb-4">
-              <label class="form-label fw-bold" data-i18n="book.date">Booking date</label>
-              <input type="date" id="booking-date" class="form-control form-control-lg" required onchange="fetchAndGenerateSlots()">
-              <div id="date-warning" class="form-text text-danger d-none" data-i18n="book.dateUnavailable">This date is not available.</div>
-            </div>
+                    <!-- 3. اختيار أيام الأسبوع (بدلاً من التقويم والتواريخ) -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">اختر يوم الأسبوع</label>
+                        <div class="d-flex flex-wrap gap-2" id="days-container">
+                            <span class="text-muted">اختر المعلم أولاً لعرض الأيام المتاحة</span>
+                        </div>
+                        <input type="hidden" id="selected-day-of-week" required>
+                    </div>
 
-            <!-- 4. الأوقات المتاحة ستظهر هنا -->
-            <div class="mb-4 d-none" id="slots-container">
-              <label class="form-label fw-bold" data-i18n="book.availableTimes">Available times in your timezone</label>
-              <div class="d-flex flex-wrap gap-2" id="slots-buttons">
-                <!-- الأزرار ستتولد برمجياً هنا -->
-              </div>
-              <input type="hidden" name="starts_at" id="selected-start-time" required>
-              <input type="hidden" name="session_type_id" id="session-type-id">
-            </div>
+                    <!-- 4. الأوقات المتاحة -->
+                    <div class="mb-4 d-none" id="slots-container">
+                        <label class="form-label fw-bold" data-i18n="book.availableTimes">Available times in your timezone</label>
+                        <div class="d-flex flex-wrap gap-2" id="slots-buttons"></div>
+                        <input type="hidden" name="starts_at" id="selected-start-time" required>
+                        <input type="hidden" name="session_type_id" id="session_type-id">
+                    </div>
 
-            <!-- 5. بيانات الطالب -->
-            <div class="mb-4">
-              <label class="form-label fw-bold" data-i18n="book.studentName">Your full name</label>
-              <input type="text" name="student_name" class="form-control" required>
-            </div>
-            <div class="mb-4">
-              <label class="form-label fw-bold" data-i18n="dashboard.email">Email</label>
-              <input type="email" name="student_email" class="form-control" required>
-            </div>
+                    <!-- 5. بيانات الطالب -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold" data-i18n="book.studentName">Your full name</label>
+                        <input type="text" name="student_name" class="form-control" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label fw-bold" data-i18n="dashboard.email">Email</label>
+                        <input type="email" name="student_email" class="form-control" required>
+                    </div>
 
-            <button type="submit" class="btn btn-primary btn-lg w-100" id="submit-btn" disabled>تأكيد الحجز</button>
-          </form>
+                    <button type="submit" class="btn btn-primary btn-lg w-100" id="submit-btn" disabled>تأكيد الحجز</button>
+                </form>
+            </div>
         </div>
-      </div>
     </div>
-  </div>
+</div>
 
-  <script>
-    // جلب البيانات من السيرفر (قاعدة البيانات)
-      const availability = {{ availability | tojson }};
-    const bookings = {{ bookings | tojson }};
-      const sessionTypes = {{ session_types | tojson }};
+<script>
+    // جلب البيانات من السيرفر بشكل آمن ومنع تكرار التعريفات
+    const globalAvailability = {{ availability | tojson | safe }};
+    const globalBookings = {{ bookings | tojson | safe }};
+    const globalSessionTypes = {{ session_types | tojson | safe }};
     const DateTime = luxon.DateTime;
     const studentTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    
-    // عرض المنطقة الزمنية للطالب بعد تحميل كتالوج الترجمة
+
     const timezoneLabel = () => {
-      const label = window.Maw3edyI18n
-        ? window.Maw3edyI18n.t('book.localTime', 'Your local time')
-        : 'Your local time';
-      document.getElementById('student-timezone-display').innerText = `${label}: ${studentTz}`;
+        const label = window.Maw3edyI18n ? window.Maw3edyI18n.t('book.localTime', 'Your local time') : 'Your local time';
+        document.getElementById('student-timezone-display').innerText = `${label}: ${studentTz}`;
     };
     window.addEventListener('DOMContentLoaded', timezoneLabel);
-    
-    // تقييد اختيار التاريخ ليكون من اليوم فصاعداً
-    const dateInput = document.getElementById('booking-date');
-    dateInput.min = DateTime.now().toISODate();
 
-    function updateAvailableDays() {
-      dateInput.value = '';
-      document.getElementById('slots-container').classList.add('d-none');
-      document.getElementById('submit-btn').disabled = true;
-    }
+    const teacherSelect = document.getElementById('teacher-select');
+    const daysNames = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
-    async function fetchAndGenerateSlots() {
-      const teacherSelect = document.getElementById('teacher-select');
-      const selectedDate = document.getElementById('booking-date').value;
-      const warning = document.getElementById('date-warning');
-      const slotsContainer = document.getElementById('slots-container');
-      const slotsButtons = document.getElementById('slots-buttons');
-      const submitBtn = document.getElementById('submit-btn');
-      
-      if (!teacherSelect.value || !selectedDate) return;
-
-      const teacherOpt = teacherSelect.options[teacherSelect.selectedIndex];
-      const teacherId = parseInt(teacherSelect.value);
-      const teacherTz = teacherOpt.dataset.tz;
-      const prayerBreaks = teacherOpt.dataset.prayer === 'true';
-      const teacherSession = sessionTypes.find((item) => item.teacher_id === teacherId);
-      document.getElementById('session-type-id').value = teacherSession ? teacherSession.id : '';
-
-      // تحديد رقم اليوم (0 الأحد ... 6 السبت)
-      const jsDate = new Date(selectedDate);
-      const dayOfWeek = jsDate.getDay();
-
-      // البحث عن أوقات عمل المعلم في هذا اليوم
-      const dayAvailability = availability.filter(a => a.teacher_id === teacherId && a.day_of_week === dayOfWeek);
-      
-      if (dayAvailability.length === 0) {
-        warning.classList.remove('d-none');
+    teacherSelect.addEventListener('change', () => {
+        const daysContainer = document.getElementById('days-container');
+        const slotsContainer = document.getElementById('slots-container');
+        const submitBtn = document.getElementById('submit-btn');
+        
+        daysContainer.innerHTML = '';
         slotsContainer.classList.add('d-none');
         submitBtn.disabled = true;
-        return;
-      }
-      
-      warning.classList.add('d-none');
-      slotsButtons.innerHTML = '<span class="text-muted">جاري حساب الأوقات المتاحة...</span>';
-      slotsContainer.classList.remove('d-none');
 
-      // جلب أوقات الصلاة إذا كان مفعل
-      let prayerTimes = [];
-      if (prayerBreaks) {
-        const d_str = DateTime.fromJSDate(jsDate).toFormat('dd-MM-yyyy');
-        try {
-          const res = await fetch(`/api/prayer-times?teacher_id=${teacherId}&date=${d_str}`);
-          const data = await res.json();
-          prayerTimes = data.prayer_times || [];
-        } catch(e) {
-          console.error("خطأ في جلب مواقيت الصلاة");
-        }
-      }
+        if (teacherSelect.value) {
+            const teacherId = parseInt(teacherSelect.value);
+            const teacherAvailability = globalAvailability.filter((a) => a.teacher_id === teacherId);
 
-      slotsButtons.innerHTML = ''; // تنظيف للبدء في العرض
-      const duration = parseInt(document.querySelector('input[name="duration_minutes"]:checked').value);
-
-      // إنشاء الفترات المتاحة
-      let hasAvailableSlots = false;
-
-      dayAvailability.forEach(slot => {
-        // تحويل وقت البداية والنهاية الخاص بالمعلم إلى توقيت عالمي ثم لتوقيت الطالب
-        let currentSlot = DateTime.fromISO(`${selectedDate}T${slot.start_time}`, {zone: teacherTz});
-        const endSlot = DateTime.fromISO(`${selectedDate}T${slot.end_time}`, {zone: teacherTz});
-
-        while (currentSlot.plus({minutes: duration}) <= endSlot) {
-          const slotStartUTC = currentSlot.toUTC();
-          const slotEndUTC = currentSlot.plus({minutes: duration}).toUTC();
-          
-          let isOverlapping = false;
-
-          // 1. التحقق من تعارضه مع حجوزات سابقة
-          for (let b of bookings) {
-            if (b.teacher_id === teacherId) {
-              const bStart = DateTime.fromISO(b.starts_at, {zone: 'utc'}).toUTC();
-              const bEnd = DateTime.fromISO(b.ends_at, {zone: 'utc'}).toUTC();
-              // إذا كان الوقت المطلوب يتداخل مع حجز موجود
-              if (slotStartUTC < bEnd && slotEndUTC > bStart) {
-                isOverlapping = true; break;
-              }
+            if (teacherAvailability.length === 0) {
+                daysContainer.innerHTML = '<span class="text-danger">لا توجد مواعيد مضافة لهذا المعلم بعد.</span>';
+                return;
             }
-          }
 
-          // 2. التحقق من تعارضه مع أوقات الصلاة (20 دقيقة بعد الأذان)
-          if (!isOverlapping && prayerBreaks) {
-            for (let pt of prayerTimes) {
-              const pStart = DateTime.fromISO(`${selectedDate}T${pt}`, {zone: teacherTz}).toUTC();
-              const pEnd = pStart.plus({minutes: 20});
-              if (slotStartUTC < pEnd && slotEndUTC > pStart) {
-                isOverlapping = true; break;
-              }
-            }
-          }
+            const availableDays = [...new Set(teacherAvailability.map(a => a.day_of_week))];
 
-          // 3. التحقق أن الموعد ليس في الماضي
-          if (slotStartUTC < DateTime.now().toUTC()) {
-            isOverlapping = true;
-          }
-
-          if (!isOverlapping) {
-            hasAvailableSlots = true;
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'btn btn-outline-success time-btn';
-            // عرض الوقت بتوقيت الطالب
-            btn.innerText = currentSlot.setZone(studentTz).toLocaleString(DateTime.TIME_SIMPLE);
-            btn.onclick = () => {
-              document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
-              btn.classList.add('active');
-              // حفظ الوقت بصيغة ISO لتُرسل للسيرفر
-              document.getElementById('selected-start-time').value = slotStartUTC.toISO();
-              submitBtn.disabled = false;
-            };
-            slotsButtons.appendChild(btn);
-          }
-
-          // زيادة الوقت بـ 15 دقيقة للبحث عن الموعد التالي
-          currentSlot = currentSlot.plus({minutes: 15});
+            availableDays.forEach(dayIndex => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-outline-primary day-btn';
+                btn.innerText = daysNames[dayIndex];
+                btn.onclick = () => {
+                    document.querySelectorAll('.day-btn').forEach((b) => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById('selected-day-of-week').value = dayIndex;
+                    generateSlotsForDay(dayIndex);
+                };
+                daysContainer.appendChild(btn);
+            });
+        } else {
+            daysContainer.innerHTML = '<span class="text-muted">اختر المعلم أولاً لعرض الأيام المتاحة</span>';
         }
-      });
+    });
 
-      if (!hasAvailableSlots) {
-        slotsButtons.innerHTML = '<span class="text-danger">لا يوجد أوقات متاحة في هذا اليوم أو تم حجزها بالكامل.</span>';
-        submitBtn.disabled = true;
-      }
+    function generateSlotsForDay(dayOfWeek) {
+        const teacherId = parseInt(teacherSelect.value);
+        const teacherOpt = teacherSelect.options[teacherSelect.selectedIndex];
+        const teacherTz = teacherOpt.dataset.tz;
+        
+        const daySlots = globalAvailability.filter((a) => a.teacher_id === teacherId && a.day_of_week === parseInt(dayOfWeek));
+        const slotsContainer = document.getElementById('slots-container');
+        const slotsButtons = document.getElementById('slots-buttons');
+        const submitBtn = document.getElementById('submit-btn');
+        const teacherSession = globalSessionTypes.find((item) => item.teacher_id === teacherId);
+        document.getElementById('session_type-id').value = teacherSession ? teacherSession.id : '';
+
+        slotsButtons.innerHTML = '';
+        slotsContainer.classList.remove('d-none');
+
+        const duration = parseInt(document.querySelector('input[name="duration_minutes"]:checked').value);
+        let hasSlots = false;
+        const todayStr = DateTime.now().toISODate();
+
+        daySlots.forEach((slot) => {
+            let currentSlot = DateTime.fromISO(`${todayStr}T${slot.start_time}`, { zone: teacherTz });
+            const endSlot = DateTime.fromISO(`${todayStr}T${slot.end_time}`, { zone: teacherTz });
+
+            while (currentSlot.plus({ minutes: duration }) <= endSlot) {
+                hasSlots = true;
+                const slotStartUTC = currentSlot.toUTC();
+                
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-outline-success time-btn';
+                btn.innerText = currentSlot.setZone(studentTz).toLocaleString(DateTime.TIME_SIMPLE);
+                btn.onclick = () => {
+                    document.querySelectorAll('.time-btn').forEach((b) => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById('selected-start-time').value = slotStartUTC.toISO();
+                    submitBtn.disabled = false;
+                };
+                slotsButtons.appendChild(btn);
+
+                currentSlot = currentSlot.plus({ minutes: duration });
+            }
+        });
+
+        if (!hasSlots) {
+            slotsButtons.innerHTML = '<span class="text-danger">لا توجد أوقات متاحة في هذا اليوم.</span>';
+            submitBtn.disabled = true;
+        }
     }
 
-    // إعادة الحساب عند تغيير المدة
-    document.querySelectorAll('input[name="duration_minutes"]').forEach(radio => {
-      radio.addEventListener('change', () => {
-        if (document.getElementById('booking-date').value) {
-          fetchAndGenerateSlots();
-        }
-      });
+    document.querySelectorAll('input[name="duration_minutes"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+            const selectedDay = document.getElementById('selected-day-of-week').value;
+            if (selectedDay !== "") {
+                generateSlotsForDay(selectedDay);
+            }
+        });
     });
-  </script>
+</script>
 </body>
 </html>

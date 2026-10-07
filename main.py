@@ -7,7 +7,8 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
+from dotenv import load_dotenv
+load_dotenv()
 import psycopg2
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from psycopg2.extras import RealDictCursor
@@ -406,30 +407,52 @@ def update_profile():
 def book():
     try:
         ensure_schema()
-        teachers = fetch_all("SELECT id, full_name, timezone, country, city, prayer_breaks FROM teachers")
-        availability = fetch_all("SELECT * FROM availability")
+        teachers = fetch_all("SELECT id, full_name, timezone, country, city, booking_link_slug, prayer_breaks FROM teachers")
+        raw_availability = fetch_all("SELECT id, teacher_id, day_of_week, start_time, end_time FROM availability")
+        
+        # تحويل كائنات الوقت (time) إلى نصوص (strings) لتجنب مشكلة الـ JSON Serialization
+        availability = []
+        for slot in raw_availability:
+            slot_copy = dict(slot)
+            if slot_copy.get('start_time'):
+                slot_copy['start_time'] = str(slot_copy['start_time'])
+            if slot_copy.get('end_time'):
+                slot_copy['end_time'] = str(slot_copy['end_time'])
+            availability.append(slot_copy)
+
         bookings = fetch_all(
             """
-            SELECT teacher_id, session_type_id, starts_at, ends_at
-            FROM bookings
+            SELECT teacher_id, session_type_id, starts_at, ends_at 
+            FROM bookings 
             WHERE status = 'confirmed'
             """
         )
+        
+        # تحويل تواريخ الحجوزات إلى نصوص آمنة أيضاً
+        safe_bookings = []
+        for b in bookings:
+            b_copy = dict(b)
+            if b_copy.get('starts_at'):
+                b_copy['starts_at'] = b_copy['starts_at'].isoformat()
+            if b_copy.get('ends_at'):
+                b_copy['ends_at'] = b_copy['ends_at'].isoformat()
+            safe_bookings.append(b_copy)
+
         session_types = fetch_all(
             """
-            SELECT id, teacher_id, title, duration_minutes, description
-            FROM session_types
+            SELECT id, teacher_id, title, duration_minutes, description 
+            FROM session_types 
             ORDER BY teacher_id, title
             """
         )
     except DatabaseUnavailable:
-        teachers, availability, bookings, session_types = [], [], [], []
+        teachers, availability, safe_bookings, session_types = [], [], [], []
 
     return render_template(
         "book.html",
         teachers=teachers,
         availability=availability,
-        bookings=bookings,
+        bookings=safe_bookings,
         session_types=session_types,
     )
 
