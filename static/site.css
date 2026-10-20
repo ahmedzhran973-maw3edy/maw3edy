@@ -68,7 +68,7 @@ button, input, select, textarea { font: inherit; }
   font-weight: 800;
   cursor: pointer;
 }
-.button:hover, button:hover { background: var(--brand-dark); }
+.button:hover { background: var(--brand-dark); }
 .button.secondary { color: var(--ink); background: white; border: 1px solid var(--line); box-shadow: none; }
 .eyebrow {
   color: var(--brand);
@@ -123,19 +123,12 @@ h2 { letter-spacing: -.04em; }
 .card-intro, .card > p { margin: 0 0 18px; color: var(--muted); font-size: .9rem; line-height: 1.55; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .full { grid-column: 1 / -1; }
-label { display: grid; gap: 7px; color: #344054; font-size: .82rem; font-weight: 750; }
-input, select, textarea {
-  width: 100%;
-  border: 1px solid #d0d5dd;
-  border-radius: 10px;
-  padding: 11px 12px;
-  color: var(--ink);
-  background: white;
-  font-size: .92rem;
+label.form-label { color: #344054; }
+.form-control, .form-select {
+  border-radius: 0.75rem;
 }
-textarea { min-height: 78px; resize: vertical; }
-input:focus, select:focus, textarea:focus { outline: 3px solid #e0e7ff; border-color: var(--brand); }
-button { border: 0; border-radius: 10px; padding: 11px 15px; color: white; background: var(--brand); font-weight: 800; cursor: pointer; margin-top: 15px; }
+textarea.form-control { min-height: 78px; resize: vertical; }
+button.button { border: 0; border-radius: 10px; padding: 11px 15px; color: white; background: var(--brand); font-weight: 800; cursor: pointer; }
 .flash { margin-bottom: 14px; border-radius: 10px; padding: 12px 14px; font-size: .9rem; }
 .flash.success { color: var(--good); background: #ecfdf3; }
 .flash.error { color: var(--bad); background: #fef3f2; }

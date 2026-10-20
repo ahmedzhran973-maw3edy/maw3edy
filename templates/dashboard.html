@@ -1,130 +1,123 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="page.dashboardTitle">Teacher dashboard | Maw3edy</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" data-bootstrap-css>
-  <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
+  <title>لوحة التحكم | مواعيدي</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8f9fa; font-family: system-ui, -apple-system, sans-serif; }
+    .card { border: none; border-radius: 1rem; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075); }
+  </style>
 </head>
-<body class="bg-light">
-  <div class="container py-4">
-    <header class="d-flex flex-wrap justify-content-between align-items-center mb-5 border-bottom pb-3">
-      <a href="/" class="fs-4 text-decoration-none fw-bold text-primary">Maw3edy</a>
-      <nav class="d-flex align-items-center gap-3">
-        <a href="/" class="text-decoration-none text-secondary" data-i18n="nav.home">Home</a>
-        <a href="/book" class="text-decoration-none text-secondary" data-i18n="nav.book">Book a session</a>
-        <a href="/logout" class="btn btn-outline-danger btn-sm" data-i18n="dashboard.logout">Log out</a>
-        <select class="form-select form-select-sm w-auto" data-language-selector aria-label="Language">
-          <option value="en" data-i18n="languages.en">English</option>
-          <option value="ar" data-i18n="languages.ar">العربية</option>
-          <option value="fr" data-i18n="languages.fr">Français</option>
-          <option value="es" data-i18n="languages.es">Español</option>
-          <option value="de" data-i18n="languages.de">Deutsch</option>
-          <option value="tr" data-i18n="languages.tr">Türkçe</option>
-        </select>
-      </nav>
-    </header>
-
-    <div class="row">
-      <!-- تعديل بيانات المعلم الشخصية -->
-      <div class="col-md-6 mb-4">
-        <div class="card shadow-sm border-0">
-          <div class="card-body p-4">
-            <h4 class="card-title text-primary mb-4" data-i18n="dashboard.profileTitle">Your teacher profile</h4>
-            <form action="/api/update-profile" method="POST">
-              <div class="mb-3">
-                <label class="form-label fw-bold" data-i18n="auth.fullName">Full name</label>
-                <input type="text" name="full_name" class="form-control" value="{{ active_teacher.full_name }}" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label fw-bold" data-i18n="dashboard.emailReadonly">Email (cannot be changed)</label>
-                <input type="email" class="form-control" value="{{ active_teacher.email }}" disabled>
-              </div>
-              <div class="mb-3">
-                <label class="form-label fw-bold" data-i18n="dashboard.bio">Short bio (optional)</label>
-                <textarea name="bio" class="form-control" data-i18n-placeholder="dashboard.bioPlaceholder" placeholder="What do you teach?">{{ active_teacher.bio }}</textarea>
-              </div>
-              <div class="mb-3">
-                <label class="form-label fw-bold" data-i18n="auth.phone">Phone number</label>
-                <input type="tel" name="phone_number" class="form-control" value="{{ active_teacher.phone_number }}">
-              </div>
-              <div class="row">
-                <div class="col-md-6 mb-3">
-                  <label class="form-label fw-bold" data-i18n="auth.country">Country</label>
-                  <input type="text" name="country" class="form-control" value="{{ active_teacher.country }}" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                  <label class="form-label fw-bold" data-i18n="auth.city">City</label>
-                  <input type="text" name="city" class="form-control" list="egypt-cities" value="{{ active_teacher.city }}" required>
-                  <datalist id="egypt-cities">
-                    <option value="Cairo">القاهرة</option>
-                    <option value="Alexandria">الإسكندرية</option>
-                    <option value="Banha">بنها</option>
-                    <option value="Quesna">قويسنا</option>
-                    <option value="Giza">الجيزة</option>
-                    <option value="Mansoura">المنصورة</option>
-                  </datalist>
-                </div>
-              </div>
-              <div class="form-check form-switch mb-4 mt-2">
-                <input class="form-check-input" type="checkbox" role="switch" name="prayer_breaks" id="prayerSwitch" {% if active_teacher.prayer_breaks %}checked{% endif %}>
-                <label class="form-check-label fw-bold text-success" for="prayerSwitch" data-i18n="auth.prayerBreaks">Exclude a 20-minute prayer buffer from bookable times</label>
-              </div>
-              <button type="submit" class="btn btn-primary w-100" data-i18n="dashboard.updateProfile">Update profile</button>
-            </form>
-          </div>
-        </div>
-      </div>
-
-      <!-- أوقات العمل المتاحة -->
-      <div class="col-md-6 mb-4">
-        <div class="card shadow-sm border-0">
-          <div class="card-body p-4">
-            <h4 class="card-title text-primary mb-4" data-i18n="dashboard.availabilityTitle">Your availability</h4>
-            <form action="/api/availability" method="POST" class="mb-4 bg-light p-3 rounded border">
-              <div class="mb-3">
-                <label class="form-label fw-bold" data-i18n="dashboard.day">Day</label>
-                <select name="day_of_week" class="form-select">
-                  <option value="0" data-i18n-day="0">Sunday</option>
-                  <option value="1" data-i18n-day="1">Monday</option>
-                  <option value="2" data-i18n-day="2">Tuesday</option>
-                  <option value="3" data-i18n-day="3">Wednesday</option>
-                  <option value="4" data-i18n-day="4">Thursday</option>
-                  <option value="5" data-i18n-day="5">Friday</option>
-                  <option value="6" data-i18n-day="6">Saturday</option>
-                </select>
-              </div>
-              <div class="row">
-                <div class="col-6 mb-3">
-                  <label class="form-label fw-bold" data-i18n="dashboard.startsAt">Starts at</label>
-                  <input type="time" name="start_time" class="form-control" required>
-                </div>
-                <div class="col-6 mb-3">
-                  <label class="form-label fw-bold" data-i18n="dashboard.endsAt">Ends at</label>
-                  <input type="time" name="end_time" class="form-control" required>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-success w-100" data-i18n="dashboard.addAvailability">Add availability</button>
-            </form>
-
-            <h5 class="fw-bold mb-3" data-i18n="dashboard.savedAvailability">Saved availability</h5>
-            <ul class="list-group">
-               {% set days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] %}
-              {% for slot in availability %}
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                   <strong data-i18n-day="{{ slot.day_of_week }}">{{ days[slot.day_of_week] }}</strong>
-                  <span>{{ slot.start_time }} - {{ slot.end_time }}</span>
-                </li>
-              {% else %}
-                <li class="list-group-item text-muted" data-i18n="dashboard.noAvailability">No availability windows yet.</li>
-              {% endfor %}
-            </ul>
-          </div>
-        </div>
+<body>
+  
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
+    <div class="container">
+      <a class="navbar-brand fw-bold" href="#">مواعيدي - لوحة المعلم</a>
+      <div class="d-flex">
+        <span class="navbar-text me-3 text-white">أهلاً، {{ teacher.full_name }}</span>
+        <a href="/logout" class="btn btn-light btn-sm rounded-3 fw-bold">تسجيل خروج</a>
       </div>
     </div>
+  </nav>
+
+  <div class="container pb-5">
+    <div class="row g-4">
+      
+      <!-- إعدادات الحساب والمشاركة -->
+      <div class="col-md-4">
+        <div class="card p-4 mb-4">
+          <h5 class="fw-bold mb-3 text-primary">رابط الحجز الخاص بك</h5>
+          <p class="text-muted small">شارك هذا الرابط مع طلابك ليتمكنوا من حجز المواعيد معك مباشرة.</p>
+          <button onclick="copySmartLink()" class="btn btn-outline-primary rounded-3 w-100 fw-bold" id="copyBtn">
+            نسخ الرابط الذكي 🔗
+          </button>
+          
+          <hr class="my-4">
+          
+          <h5 class="fw-bold mb-3 text-primary">إعدادات متقدمة</h5>
+          <div class="form-check form-switch d-flex align-items-center p-0">
+            <input class="form-check-input ms-2 mt-0" type="checkbox" id="prayerToggle" role="switch" style="width: 40px; height: 20px;" {% if teacher.prayer_breaks %}checked{% endif %} onchange="togglePrayer(this)">
+            <label class="form-check-label fw-bold" for="prayerToggle">خصم أوقات الصلاة تلقائياً</label>
+          </div>
+          <p class="text-muted small mt-2">سيتم استبعاد 30 دقيقة وقت كل صلاة بتوقيت مدينتك ({{ teacher.city }}).</p>
+        </div>
+      </div>
+
+      <!-- جدول الحجوزات القادمة -->
+      <div class="col-md-8">
+        <div class="card p-4">
+          <h5 class="fw-bold mb-4 text-primary">حجوزات الطلاب القادمة</h5>
+          
+          {% if bookings %}
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>الطالب</th>
+                  <th>رقم الواتساب</th>
+                  <th>الموعد (بتوقيتك)</th>
+                  <th>المدة</th>
+                  <th>ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for b in bookings %}
+                <tr>
+                  <td class="fw-bold">{{ b.student_name }}</td>
+                  <td dir="ltr" class="text-end">{{ b.student_whatsapp }}</td>
+                  <td><span class="badge bg-primary rounded-pill px-3 py-2">{{ b.starts_at[:16].replace('T', ' - ') }}</span></td>
+                  <td>{{ b.duration_minutes }} دقيقة</td>
+                  <td><small class="text-muted">{{ b.notes or 'لا يوجد' }}</small></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="text-center py-5">
+            <p class="text-muted mb-0">لا توجد حجوزات قادمة حتى الآن.</p>
+          </div>
+          {% endif %}
+          
+        </div>
+      </div>
+
+    </div>
   </div>
+
+  <script>
+    // 1. زر النسخ الذكي
+    function copySmartLink() {
+      const link = window.location.origin + '/book/{{ teacher.booking_link_slug }}';
+      const textToCopy = `احجز حصتك معي الآن عبر مواعيدي: ${link}`;
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        const btn = document.getElementById('copyBtn');
+        btn.innerText = "تم النسخ بنجاح! ✅";
+        btn.classList.replace('btn-outline-primary', 'btn-success');
+        setTimeout(() => {
+          btn.innerText = "نسخ الرابط الذكي 🔗";
+          btn.classList.replace('btn-success', 'btn-outline-primary');
+        }, 3000);
+      });
+    }
+
+    // 2. تفعيل/إلغاء خصم أوقات الصلاة
+    function togglePrayer(checkbox) {
+      fetch('/api/toggle_prayer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prayer_breaks: checkbox.checked })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if(!data.success) {
+          alert('حدث خطأ أثناء حفظ الإعدادات');
+          checkbox.checked = !checkbox.checked;
+        }
+      });
+    }
+  </script>
 </body>
 </html>
