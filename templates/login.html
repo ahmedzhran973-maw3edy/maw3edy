@@ -24,9 +24,29 @@
       </div>
       <h2 class="text-center text-primary mb-4 fw-bold" data-i18n="auth.loginTitle">Teacher login</h2>
 
-      {% if error %}
-      <div class="alert alert-danger" data-i18n="{{ error_key }}">{{ error }}</div>
+      <!-- بداية التعديل: نظام إظهار الأخطاء الذكي -->
+      {% if error_key %}
+        <div class="alert alert-danger" style="text-align: center; font-weight: bold;">
+          {% if error_key == 'auth.invalidCredentials' %}
+            البريد الإلكتروني أو كلمة المرور غير صحيحة!
+          {% elif error_key == 'auth.databaseError' %}
+            خطأ في الاتصال بقاعدة البيانات، تأكد من تنشيطها من Supabase.
+          {% else %}
+            حدث خطأ، يرجى المحاولة مرة أخرى. ({{ error_key }})
+          {% endif %}
+        </div>
       {% endif %}
+      
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }}" style="text-align: center; font-weight: bold;">
+              {{ message }}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      <!-- نهاية كود الأخطاء -->
 
       <form action="/login" method="POST">
         <div class="mb-3">
