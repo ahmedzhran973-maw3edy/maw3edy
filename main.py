@@ -31,6 +31,7 @@ SCHEMA_STATEMENTS = (
         timezone TEXT NOT NULL DEFAULT 'Africa/Cairo',
         country TEXT NOT NULL DEFAULT 'Egypt',
         city TEXT NOT NULL DEFAULT 'Cairo',
+        profession TEXT NOT NULL DEFAULT 'معلم أونلاين',
         prayer_breaks BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -65,9 +66,11 @@ SCHEMA_STATEMENTS = (
         session_type_id BIGINT REFERENCES session_types(id) ON DELETE CASCADE,
         student_name TEXT NOT NULL,
         student_email TEXT NOT NULL,
+        student_whatsapp TEXT NOT NULL DEFAULT '',
         duration_minutes INTEGER NOT NULL DEFAULT 60 CHECK (duration_minutes > 0),
         starts_at TIMESTAMP NOT NULL,
         ends_at TIMESTAMP NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'confirmed'
             CHECK (status IN ('confirmed', 'cancelled')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -94,10 +97,49 @@ ALTER_STATEMENTS = (
     "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'Egypt';",
     "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT 'Cairo';",
     "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS prayer_breaks BOOLEAN NOT NULL DEFAULT TRUE;",
+    "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS profession TEXT NOT NULL DEFAULT 'معلم أونلاين';",
     "ALTER TABLE session_types ADD COLUMN IF NOT EXISTS link_slug TEXT;",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 60;",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS session_type_id BIGINT;"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS session_type_id BIGINT;",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS student_whatsapp TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';"
 )
+
+PROFESSIONS = (
+    "معلم أونلاين",
+    "صاحب أكاديمية",
+    "مدرس خصوصي",
+    "معلم لغات",
+    "مدرب مهارات",
+    "معلم قرآن",
+    "معلم مواد دراسية",
+)
+TIMEZONES = (
+    "Africa/Cairo",
+    "Asia/Riyadh",
+    "Asia/Dubai",
+    "Asia/Kuwait",
+    "Asia/Qatar",
+    "Asia/Amman",
+    "Asia/Beirut",
+    "Africa/Casablanca",
+    "Europe/Istanbul",
+    "Europe/London",
+    "Europe/Paris",
+    "America/New_York",
+)
+DEFAULT_PROFESSION = "معلم أونلاين"
+PRAYER_BLOCK_MINUTES = 30
+
+
+@app.context_processor
+def inject_catalog():
+    return {
+        "professions": PROFESSIONS,
+        "timezones": TIMEZONES,
+        "default_profession": DEFAULT_PROFESSION,
+        "prayer_block_minutes": PRAYER_BLOCK_MINUTES,
+    }
 
 _schema_lock = Lock()
 _schema_ready = False
@@ -213,7 +255,7 @@ def prayer_overlap(starts_at, ends_at, teacher, teacher_timezone):
         except ValueError:
             continue
         prayer_start_utc = prayer_start.astimezone(timezone.utc).replace(tzinfo=None)
-        prayer_end_utc = prayer_start_utc + timedelta(minutes=20)
+        prayer_end_utc = prayer_start_utc + timedelta(minutes=PRAYER_BLOCK_MINUTES)
         if starts_at < prayer_end_utc and ends_at > prayer_start_utc:
             return True
     return False
@@ -250,7 +292,13 @@ def login_teacher():
             conn.close()
 
         stored_hash = teacher.get("password_hash") if teacher else None
-        if stored_hash and check_password_hash(stored_hash, password):
+        password_ok = False
+        if stored_hash:
+            try:
+                password_ok = check_password_hash(stored_hash, password)
+            except (TypeError, ValueError):
+                password_ok = False
+        if password_ok:
             session.clear()
             session["active_teacher_id"] = teacher["id"]
             session.permanent = True
@@ -274,6 +322,12 @@ def register_teacher():
     phone_number = str(data.get("phone_number", "")).strip()
     country = str(data.get("country", "Egypt")).strip() or "Egypt"
     city = str(data.get("city", "Cairo")).strip() or "Cairo"
+    timezone_name = str(data.get("timezone", "Africa/Cairo")).strip() or "Africa/Cairo"
+    if timezone_name not in TIMEZONES:
+        timezone_name = "Africa/Cairo"
+    profession = str(data.get("profession", DEFAULT_PROFESSION)).strip() or DEFAULT_PROFESSION
+    if profession not in PROFESSIONS:
+        profession = DEFAULT_PROFESSION
     bio = str(data.get("bio", "")).strip()
     prayer_breaks = data.get("prayer_breaks") in ("true", "on", True, 1, "1")
 
@@ -293,8 +347,8 @@ def register_teacher():
                         """
                         INSERT INTO teachers
                             (full_name, email, password_hash, booking_link_slug,
-                             phone_number, bio, country, city, prayer_breaks)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             phone_number, bio, country, city, timezone, profession, prayer_breaks)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING *
                         """,
                         (
@@ -306,6 +360,8 @@ def register_teacher():
                             bio,
                             country,
                             city,
+                            timezone_name,
+                            profession,
                             prayer_breaks,
                         ),
                     )
@@ -370,9 +426,15 @@ def update_profile():
     full_name = request.form.get("full_name", "").strip()
     phone_number = request.form.get("phone_number", "").strip()
     bio = request.form.get("bio", "").strip()
-    country = request.form.get("country", "Egypt").strip()
-    city = request.form.get("city", "Cairo").strip()
-    prayer_breaks = True if request.form.get("prayer_breaks") in ['true', 'on', True] else False
+    country = request.form.get("country", "Egypt").strip() or "Egypt"
+    city = request.form.get("city", "Cairo").strip() or "Cairo"
+    timezone_name = (request.form.get("timezone") or "Africa/Cairo").strip()
+    if timezone_name not in TIMEZONES:
+        timezone_name = "Africa/Cairo"
+    profession = (request.form.get("profession") or DEFAULT_PROFESSION).strip()
+    if profession not in PROFESSIONS:
+        profession = DEFAULT_PROFESSION
+    prayer_breaks = True if request.form.get("prayer_breaks") in ['true', 'on', True, '1', 1] else False
 
     try:
         ensure_schema()
@@ -384,7 +446,8 @@ def update_profile():
                         """
                         UPDATE teachers 
                         SET full_name = %s, bio = %s, phone_number = %s,
-                            country = %s, city = %s, prayer_breaks = %s
+                            country = %s, city = %s, timezone = %s,
+                            profession = %s, prayer_breaks = %s
                         WHERE id = %s
                         """,
                         (
@@ -393,6 +456,8 @@ def update_profile():
                             phone_number,
                             country,
                             city,
+                            timezone_name,
+                            profession,
                             prayer_breaks,
                             active_id,
                         )
@@ -407,7 +472,14 @@ def update_profile():
 def book():
     try:
         ensure_schema()
-        teachers = fetch_all("SELECT id, full_name, timezone, country, city, booking_link_slug, prayer_breaks FROM teachers")
+        teachers = fetch_all(
+            """
+            SELECT id, full_name, timezone, country, city, booking_link_slug,
+                   prayer_breaks, bio, profession, phone_number
+            FROM teachers
+            ORDER BY full_name
+            """
+        )
         raw_availability = fetch_all("SELECT id, teacher_id, day_of_week, start_time, end_time FROM availability")
         
         # تحويل كائنات الوقت (time) إلى نصوص (strings) لتجنب مشكلة الـ JSON Serialization
@@ -490,11 +562,12 @@ def set_availability():
     if not teacher_id:
         return redirect(url_for("login_page"))
 
-    day_of_week = int(request.form.get("day_of_week", 0))
-    start_time = request.form.get("start_time")
-    end_time = request.form.get("end_time")
-
+    start_time = (request.form.get("start_time") or "").strip()
+    end_time = (request.form.get("end_time") or "").strip()
     try:
+        day_of_week = int(request.form.get("day_of_week", 0))
+        if day_of_week < 0 or day_of_week > 6 or not start_time or not end_time or start_time >= end_time:
+            raise ValueError("Invalid availability window.")
         ensure_schema()
         conn = connect_db()
         try:
@@ -511,8 +584,8 @@ def set_availability():
         finally:
             conn.close()
         return redirect(url_for("dashboard"))
-    except DatabaseUnavailable:
-        return jsonify({"error": "خطأ في الاتصال بقاعدة البيانات"}), 503
+    except (DatabaseUnavailable, psycopg2.Error, ValueError, TypeError):
+        return redirect(url_for("dashboard"))
 
 @app.post("/api/bookings")
 def create_booking():
@@ -528,10 +601,13 @@ def create_booking():
 
     student_name = str(data.get("student_name", "")).strip()
     student_email = str(data.get("student_email", "")).strip().lower()
+    student_whatsapp = str(data.get("student_whatsapp", "")).strip()
     notes = str(data.get("notes", "")).strip()
 
     if not student_name or "@" not in student_email:
         return jsonify({"error": "A student name and valid email are required."}), 400
+    if len(re.sub(r"\D", "", student_whatsapp)) < 8:
+        return jsonify({"error": "A valid WhatsApp number is required for session reminders."}), 400
 
     try:
         starts_at = parse_utc_datetime(data.get("starts_at"))
@@ -556,6 +632,7 @@ def create_booking():
                     if teacher is None:
                         return jsonify({"error": "Teacher not found."}), 404
 
+                    session_type_id = None
                     raw_session_type_id = data.get("session_type_id")
                     if raw_session_type_id:
                         try:
@@ -586,9 +663,19 @@ def create_booking():
                         session_type_id = session_type["id"] if session_type else None
 
                     if session_type is None:
-                        return jsonify({"error": "This teacher has no published session type."}), 400
+                        session_type_id = None
 
-                    duration_minutes = int(session_type["duration_minutes"])
+                    duration_minutes = None
+                    try:
+                        requested_duration = int(data.get("duration_minutes"))
+                        if requested_duration in (30, 45, 60):
+                            duration_minutes = requested_duration
+                    except (TypeError, ValueError):
+                        pass
+                    if duration_minutes is None and session_type is not None:
+                        duration_minutes = int(session_type["duration_minutes"])
+                    if duration_minutes is None:
+                        duration_minutes = 60
                     ends_at = starts_at + timedelta(minutes=duration_minutes)
                     teacher_timezone = ZoneInfo(teacher["timezone"] or "UTC")
                     local_start = starts_at.replace(
@@ -652,14 +739,15 @@ def create_booking():
                         """
                         INSERT INTO bookings
                             (teacher_id, session_type_id, student_name, student_email,
-                             duration_minutes, starts_at, ends_at, notes)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                             student_whatsapp, duration_minutes, starts_at, ends_at, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             teacher_id,
                             session_type_id,
                             student_name,
                             student_email,
+                            student_whatsapp,
                             duration_minutes,
                             starts_at,
                             ends_at,

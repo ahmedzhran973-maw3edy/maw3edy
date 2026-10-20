@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="page.bookTitle">Book a session | Maw3edy</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" data-bootstrap-css>
   <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.3.0/luxon.min.js"></script>
 </head>
@@ -76,11 +76,12 @@
                         <input type="text" name="student_name" class="form-control" required>
                     </div>
                     <div class="mb-4">
-                        <label class="form-label fw-bold" data-i18n="dashboard.email">Email</label>
+                        <label class="form-label fw-bold" data-i18n="auth.email">Email</label>
                         <input type="email" name="student_email" class="form-control" required>
                     </div>
 
-                    <button type="submit" class="btn btn-primary btn-lg w-100" id="submit-btn" disabled>تأكيد الحجز</button>
+                    <div id="booking-status" class="alert d-none mb-4" role="alert"></div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100" id="submit-btn" disabled data-i18n="book.confirm">Confirm booking</button>
                 </form>
             </div>
         </div>
@@ -114,8 +115,8 @@
         submitBtn.disabled = true;
 
         if (teacherSelect.value) {
-            const teacherId = parseInt(teacherSelect.value);
-            const teacherAvailability = globalAvailability.filter((a) => a.teacher_id === teacherId);
+            const teacherId = Number(teacherSelect.value);
+            const teacherAvailability = globalAvailability.filter((a) => Number(a.teacher_id) === teacherId);
 
             if (teacherAvailability.length === 0) {
                 daysContainer.innerHTML = '<span class="text-danger">لا توجد مواعيد مضافة لهذا المعلم بعد.</span>';
@@ -142,44 +143,77 @@
         }
     });
 
+    function parseStoredUtc(isoString) {
+        if (!isoString) return null;
+        const value = String(isoString);
+        const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+        return DateTime.fromISO(normalized, { zone: 'utc' });
+    }
+
+    function dateForWeekday(dayOfWeek, zone) {
+        const now = DateTime.now().setZone(zone || studentTz).startOf('day');
+        const targetLuxonWeekday = Number(dayOfWeek) === 0 ? 7 : Number(dayOfWeek);
+        const daysAhead = (targetLuxonWeekday - now.weekday + 7) % 7;
+        return now.plus({ days: daysAhead });
+    }
+
     function generateSlotsForDay(dayOfWeek) {
-        const teacherId = parseInt(teacherSelect.value);
+        const teacherId = Number(teacherSelect.value);
         const teacherOpt = teacherSelect.options[teacherSelect.selectedIndex];
         const teacherTz = teacherOpt.dataset.tz;
+        const selectedDate = dateForWeekday(dayOfWeek, teacherTz);
+        const dateStr = selectedDate.toISODate();
         
-        const daySlots = globalAvailability.filter((a) => a.teacher_id === teacherId && a.day_of_week === parseInt(dayOfWeek));
+        const daySlots = globalAvailability.filter((a) => Number(a.teacher_id) === teacherId && Number(a.day_of_week) === Number(dayOfWeek));
         const slotsContainer = document.getElementById('slots-container');
         const slotsButtons = document.getElementById('slots-buttons');
         const submitBtn = document.getElementById('submit-btn');
-        const teacherSession = globalSessionTypes.find((item) => item.teacher_id === teacherId);
+        const teacherSession = globalSessionTypes.find((item) => Number(item.teacher_id) === teacherId);
         document.getElementById('session_type-id').value = teacherSession ? teacherSession.id : '';
+        document.getElementById('selected-start-time').value = '';
 
         slotsButtons.innerHTML = '';
         slotsContainer.classList.remove('d-none');
 
-        const duration = parseInt(document.querySelector('input[name="duration_minutes"]:checked').value);
+        const duration = parseInt(document.querySelector('input[name="duration_minutes"]:checked').value, 10);
+        if (!Number.isFinite(duration) || duration <= 0) {
+            slotsButtons.innerHTML = '<span class="text-danger">لا توجد أوقات متاحة في هذا اليوم.</span>';
+            submitBtn.disabled = true;
+            return;
+        }
+        const nowUtc = DateTime.utc();
         let hasSlots = false;
-        const todayStr = DateTime.now().toISODate();
 
         daySlots.forEach((slot) => {
-            let currentSlot = DateTime.fromISO(`${todayStr}T${slot.start_time}`, { zone: teacherTz });
-            const endSlot = DateTime.fromISO(`${todayStr}T${slot.end_time}`, { zone: teacherTz });
+            let currentSlot = DateTime.fromISO(`${dateStr}T${slot.start_time}`, { zone: teacherTz });
+            const endSlot = DateTime.fromISO(`${dateStr}T${slot.end_time}`, { zone: teacherTz });
+            if (!currentSlot.isValid || !endSlot.isValid) return;
 
             while (currentSlot.plus({ minutes: duration }) <= endSlot) {
-                hasSlots = true;
                 const slotStartUTC = currentSlot.toUTC();
-                
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'btn btn-outline-success time-btn';
-                btn.innerText = currentSlot.setZone(studentTz).toLocaleString(DateTime.TIME_SIMPLE);
-                btn.onclick = () => {
-                    document.querySelectorAll('.time-btn').forEach((b) => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    document.getElementById('selected-start-time').value = slotStartUTC.toISO();
-                    submitBtn.disabled = false;
-                };
-                slotsButtons.appendChild(btn);
+                const slotEndUTC = slotStartUTC.plus({ minutes: duration });
+                const alreadyBooked = globalBookings.some((booking) => {
+                    if (Number(booking.teacher_id) !== teacherId) return false;
+                    const bookedStart = parseStoredUtc(booking.starts_at);
+                    const bookedEnd = parseStoredUtc(booking.ends_at);
+                    if (!bookedStart || !bookedEnd || !bookedStart.isValid || !bookedEnd.isValid) return false;
+                    return slotStartUTC < bookedEnd && slotEndUTC > bookedStart;
+                });
+
+                if (slotStartUTC > nowUtc && !alreadyBooked) {
+                    hasSlots = true;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-outline-success time-btn';
+                    btn.innerText = currentSlot.setZone(studentTz).toLocaleString(DateTime.TIME_SIMPLE);
+                    btn.onclick = () => {
+                        document.querySelectorAll('.time-btn').forEach((b) => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        document.getElementById('selected-start-time').value = slotStartUTC.toISO();
+                        submitBtn.disabled = false;
+                    };
+                    slotsButtons.appendChild(btn);
+                }
 
                 currentSlot = currentSlot.plus({ minutes: duration });
             }
@@ -198,6 +232,39 @@
                 generateSlotsForDay(selectedDay);
             }
         });
+    });
+
+    document.getElementById('booking-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitBtn = document.getElementById('submit-btn');
+        const status = document.getElementById('booking-status');
+        submitBtn.disabled = true;
+        status.classList.add('d-none');
+        try {
+            const response = await fetch(event.target.action, {
+                method: 'POST',
+                body: new FormData(event.target),
+                headers: { Accept: 'application/json' },
+            });
+            const payload = await response.json().catch(() => ({}));
+            status.classList.remove('d-none', 'alert-success', 'alert-danger');
+            if (response.ok && payload.success) {
+                status.classList.add('alert-success');
+                status.textContent = payload.message || 'Booking confirmed.';
+                event.target.reset();
+                document.getElementById('days-container').innerHTML = '<span class="text-muted">اختر المعلم أولاً لعرض الأيام المتاحة</span>';
+                document.getElementById('slots-container').classList.add('d-none');
+            } else {
+                status.classList.add('alert-danger');
+                status.textContent = payload.error || 'The booking could not be saved.';
+                submitBtn.disabled = false;
+            }
+        } catch (error) {
+            status.classList.remove('d-none', 'alert-success');
+            status.classList.add('alert-danger');
+            status.textContent = 'The booking could not be saved.';
+            submitBtn.disabled = false;
+        }
     });
 </script>
 </body>
